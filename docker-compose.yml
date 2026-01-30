@@ -1,0 +1,63 @@
+services:
+  # OpenBao backend
+  openbao:
+    image: hashicorp/vault:latest
+    container_name: est-openbao
+    ports:
+      - "8200:8200"
+    environment:
+      VAULT_DEV_ROOT_TOKEN_ID: "root"
+      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+    cap_add:
+      - IPC_LOCK
+    # healthcheck:
+    #   test:
+    #     ["CMD", "wget", "--spider", "-q", "http://localhost:8200/v1/sys/health"]
+    #   interval: 5s
+    #   timeout: 3s
+    #   retries: 5
+    networks:
+      - est-net
+
+  # EST Service
+  est-service:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile
+    container_name: est-service
+    ports:
+      - "8443:8443"
+      - "9090:9090"
+    volumes:
+      - ./configs/dev.yaml:/etc/est/est-service.yaml:ro
+      # - ./test/fixtures/certs:/etc/est/certs:ro
+    environment:
+      - BAO_TOKEN=root
+      - BAO_ADDR=http://openbao:8200
+    depends_on:
+      - openbao
+        # condition: service_healthy
+    networks:
+      - est-net
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verify-certificate",
+          "-q",
+          "--spider",
+          "https://localhost:8443/health",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+
+networks:
+  est-net:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:

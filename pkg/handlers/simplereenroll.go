@@ -1,0 +1,214 @@
+package handlers
+
+import (
+	"context"
+	"crypto/x509"
+	"encoding/base64"
+	"fmt"
+	"log/slog"
+	"net/http"
+
+	"github.com/mabunixda/est-service/pkg/auth"
+	"github.com/mabunixda/est-service/pkg/backend"
+	"github.com/mabunixda/est-service/pkg/est"
+)
+
+// SimpleReenrollHandler handles POST /.well-known/est/simplereenroll
+type SimpleReenrollHandler struct {
+	backend   backend.Backend
+	authMgr   *auth.Manager
+	config    *EnrollmentConfig
+	logger    *slog.Logger
+	telemetry Telemetry
+}
+
+// NewSimpleReenrollHandler creates a new simple reenrollment handler
+func NewSimpleReenrollHandler(backend backend.Backend, authMgr *auth.Manager, config *EnrollmentConfig, logger *slog.Logger, telemetry Telemetry) *SimpleReenrollHandler {
+	if logger == nil {
+		logger = slog.Default()
+	}
+
+	if config.MaxCSRSize == 0 {
+		config.MaxCSRSize = 10 * 1024 * 1024
+	}
+
+	return &SimpleReenrollHandler{
+		backend:   backend,
+		authMgr:   authMgr,
+		config:    config,
+		logger:    logger,
+		telemetry: telemetry,
+	}
+}
+
+// ServeHTTP handles the simple reenrollment request
+// @Summary Reenroll an existing certificate
+// @Description Submit a Certificate Signing Request (CSR) to renew an existing certificate. Requires authentication and optionally validates that the CSR matches the client certificate.
+// @Tags EST
+// @Accept application/pkcs10
+// @Produce application/pkcs7-mime
+// @Param body body string true "Base64-encoded PKCS#10 Certificate Signing Request"
+// @Success 200 {string} string "Renewed certificate in base64-encoded PKCS#7 format"
+// @Failure 400 {string} string "Invalid CSR, CSR signature, or CSR does not match client certificate"
+// @Failure 401 {string} string "Authentication required"
+// @Failure 500 {string} string "Reenrollment failed"
+// @Security BasicAuth
+// @Security BearerAuth
+// @Router /.well-known/est/simplereenroll [post]
+func (h *SimpleReenrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		h.logger.Debug("Invalid method for /simplereenroll", "method", r.Method)
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx := r.Context()
+
+	// Try to get TLS client certificate (optional for non-TLS environments)
+	clientCert, err := est.ExtractTLSClientCertificate(r)
+	hasTLSCert := err == nil && clientCert != nil
+
+	// Authentication is required (either TLS cert or other methods like Basic Auth)
+	authResult := h.authMgr.Authenticate(ctx, r)
+	if !authResult.Authenticated {
+		h.logger.Debug("Authentication failed", "error", authResult.Error)
+		if h.telemetry != nil {
+			h.telemetry.RecordAuthFailure(ctx, authResult.Method, authResult.Error.Error())
+		}
+		h.sendAuthRequired(w)
+		return
+	}
+
+	if h.telemetry != nil {
+		h.telemetry.RecordAuthSuccess(ctx, authResult.Method, authResult.Identity)
+	}
+
+	if hasTLSCert {
+		h.logger.Info("Reenrollment request authenticated with TLS certificate",
+			"method", authResult.Method,
+			"identity", authResult.Identity,
+			"cert_subject", clientCert.Subject.String())
+	} else {
+		h.logger.Info("Reenrollment request authenticated without TLS certificate",
+			"method", authResult.Method,
+			"identity", authResult.Identity)
+	}
+
+	csr, err := est.ReadCSRPayload(r)
+	if err != nil {
+		h.logger.Error("Failed to parse CSR", "error", err)
+		if h.telemetry != nil {
+			h.telemetry.RecordCertificateRejected(ctx, "reenroll", "invalid_csr")
+		}
+		http.Error(w, "Invalid CSR", http.StatusBadRequest)
+		return
+	}
+
+	if err := est.ValidateCSRSignature(csr); err != nil {
+		h.logger.Error("Invalid CSR signature", "error", err)
+		if h.telemetry != nil {
+			h.telemetry.RecordCertificateRejected(ctx, "reenroll", "invalid_signature")
+		}
+		http.Error(w, "Invalid CSR signature", http.StatusBadRequest)
+		return
+	}
+
+	// Only validate CSR matches certificate if TLS cert was provided
+	if hasTLSCert {
+		if err := est.ValidateCSRMatchesCertificate(csr, clientCert); err != nil {
+			h.logger.Error("CSR does not match client certificate",
+				"error", err,
+				"csr_subject", csr.Subject.String(),
+				"cert_subject", clientCert.Subject.String())
+			if h.telemetry != nil {
+				h.telemetry.RecordCertificateRejected(ctx, "reenroll", "csr_cert_mismatch")
+			}
+			http.Error(w, "CSR public key must match client certificate", http.StatusBadRequest)
+			return
+		}
+	}
+
+	enrollReq := &EnrollmentRequest{
+		CSR:          csr,
+		ClientCert:   clientCert,
+		Label:        "",
+		IsReenroll:   true,
+		AuthToken:    authResult.Token,
+		AuthMethod:   authResult.Method,
+		AuthIdentity: authResult.Identity,
+		Policy:       h.config.DefaultPolicy,
+	}
+
+	cert, err := h.processReenrollment(ctx, enrollReq)
+	if err != nil {
+		h.logger.Error("Reenrollment failed",
+			"error", err,
+			"subject", csr.Subject.String())
+		if h.telemetry != nil {
+			h.telemetry.RecordCertificateRejected(ctx, "reenroll", "backend_error")
+		}
+		SendBackendError(w, err, "certificate re-enrollment")
+		return
+	}
+
+	if err := h.sendCertificateResponse(w, cert); err != nil {
+		h.logger.Error("Failed to send response", "error", err)
+		return
+	}
+
+	// Track certificate issuance
+	if h.telemetry != nil {
+		h.telemetry.RecordCertificateIssued(ctx, "reenroll",
+			cert.Subject.String(),
+			cert.SerialNumber.String(),
+			enrollReq.Policy.TTL)
+	}
+
+	// Log successful reenrollment with optional old serial
+	logAttrs := []any{
+		"subject", cert.Subject.String(),
+		"serial", cert.SerialNumber.String(),
+		"identity", authResult.Identity,
+		"ttl", enrollReq.Policy.TTL,
+	}
+	if clientCert != nil {
+		logAttrs = append(logAttrs, "old_serial", clientCert.SerialNumber.String())
+	}
+	h.logger.Info("Certificate reenrolled successfully", logAttrs...)
+}
+
+func (h *SimpleReenrollHandler) processReenrollment(ctx context.Context, req *EnrollmentRequest) (*x509.Certificate, error) {
+	h.logger.Info("Using authenticated token for PKI operations",
+		"identity", req.AuthIdentity,
+		"auth_method", req.AuthMethod)
+
+	return processCSRSigning(ctx, h.backend, req, h.config)
+}
+
+func (h *SimpleReenrollHandler) sendCertificateResponse(w http.ResponseWriter, cert *x509.Certificate) error {
+	pkcs7Data, err := est.CreatePKCS7CertsOnly([]*x509.Certificate{cert})
+	if err != nil {
+		return fmt.Errorf("failed to create PKCS#7: %w", err)
+	}
+
+	// RFC 7030 requires base64 encoding for EST responses
+	base64Data := base64.StdEncoding.EncodeToString(pkcs7Data)
+
+	w.Header().Set("Content-Type", est.PKCS7ContentType)
+	w.Header().Set("Content-Transfer-Encoding", "base64")
+	w.WriteHeader(http.StatusOK)
+
+	if _, err := w.Write([]byte(base64Data)); err != nil {
+		return fmt.Errorf("failed to write response: %w", err)
+	}
+
+	return nil
+}
+
+func (h *SimpleReenrollHandler) sendAuthRequired(w http.ResponseWriter) {
+	headers := h.authMgr.GetWWWAuthenticateHeaders()
+	for _, header := range headers {
+		w.Header().Add("WWW-Authenticate", header)
+	}
+	http.Error(w, "Authentication required", http.StatusUnauthorized)
+}

@@ -1,0 +1,192 @@
+name: CI
+
+on:
+  push:
+    branches: [main, initial-coding]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ["1.25"]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ matrix.go-version }}-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run unit tests
+        run: go test -race -coverprofile=coverage.out -covermode=atomic ./pkg/...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          flags: unittests
+          name: codecov-${{ matrix.go-version }}
+        if: matrix.go-version == '1.23'
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          args: --timeout=5m
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Build binary
+        run: make build
+
+      - name: Build Docker image
+        run: docker build -f deployments/docker/Dockerfile -t est-service:test .
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: est-service-binary
+          path: bin/est-service
+          retention-days: 7
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      vault:
+        image: hashicorp/vault:latest
+        env:
+          VAULT_DEV_ROOT_TOKEN_ID: root-token
+          VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+        ports:
+          - 8200:8200
+        options: >-
+          --health-cmd "vault status"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Wait for Vault
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8200/v1/sys/health >/dev/null 2>&1; then
+              echo "Vault is ready"
+              break
+            fi
+            echo "Waiting for Vault... ($i/30)"
+            sleep 2
+          done
+
+      - name: Setup Vault PKI
+        env:
+          VAULT_ADDR: http://localhost:8200
+          VAULT_TOKEN: root-token
+        run: |
+          # Enable PKI secrets engine
+          vault secrets enable pki
+          vault secrets tune -max-lease-ttl=87600h pki
+
+          # Generate root CA
+          vault write -field=certificate pki/root/generate/internal \
+            common_name="Test Root CA" \
+            ttl=87600h > ca.crt
+
+          # Configure CA and CRL URLs
+          vault write pki/config/urls \
+            issuing_certificates="http://localhost:8200/v1/pki/ca" \
+            crl_distribution_points="http://localhost:8200/v1/pki/crl"
+
+          # Create a role for testing
+          vault write pki/roles/test-role \
+            allowed_domains="example.com,test.local" \
+            allow_subdomains=true \
+            max_ttl=72h \
+            key_type=rsa \
+            key_bits=2048
+
+          # Enable userpass auth
+          vault auth enable userpass
+          vault write auth/userpass/users/testuser \
+            password=testpass \
+            policies=default
+
+          # Create policy for PKI access
+          vault policy write pki-policy - <<EOF
+          path "pki/*" {
+            capabilities = ["create", "read", "update", "delete", "list"]
+          }
+          EOF
+
+          vault write auth/userpass/users/testuser policies=pki-policy
+
+      - name: Run integration tests
+        env:
+          VAULT_ADDR: http://localhost:8200
+          VAULT_TOKEN: root-token
+        run: go test -v -race ./test/integration/...
+
+  openapi-validate:
+    name: Validate OpenAPI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate OpenAPI spec
+        uses: char0n/swagger-editor-validate@v1
+        with:
+          definition-file: api/openapi.yaml

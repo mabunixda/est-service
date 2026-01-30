@@ -1,0 +1,80 @@
+# EST Service Configuration - HashiCorp Vault Backend Example
+# This example shows how to configure est-service with HashiCorp Vault
+# TLS is required by default. Use developer_mode: true only for local testing.
+
+# developer_mode: false  # Default: false (TLS required)
+
+server:
+  listen_address: "0.0.0.0:8443"
+  read_timeout: 15s
+  write_timeout: 15s
+  idle_timeout: 60s
+  rate_limit:
+    enabled: true
+    requests_per_second: 100
+    burst: 200
+  tls:
+    cert_file: "/etc/est/server.crt"
+    key_file: "/etc/est/server.key"
+    client_ca_file: "/etc/est/client-ca.crt"
+    client_auth_type: "request" # none, request, require
+
+# Backend configuration for HashiCorp Vault
+backend:
+  type: "vault" # Optional: auto-detected
+  address: "https://vault.example.com:8200"
+  namespace: "admin" # Vault Enterprise namespaces
+  tls_skip_verify: false
+  ca_cert: "/etc/vault/ca.crt"
+  timeout: 30s
+
+est:
+  enabled: true
+  default_mount: "pki"
+
+  labels:
+    devices:
+      type: "role"
+      value: "device-cert"
+    users:
+      type: "role"
+      value: "user-cert"
+    servers:
+      type: "sign-verbatim"
+
+  default_policy:
+    type: "role"
+    value: "default-est"
+    ttl: "720h" # 30 days
+
+  authenticators:
+    userpass:
+      enabled: true
+      mount_path: "userpass"
+    cert:
+      enabled: true
+      mount_path: "cert"
+      cert_role: "est-client"
+    token:
+      enabled: true
+
+  csr_validation:
+    max_size_bytes: 32768
+    allowed_signature_algorithms:
+      - "SHA256WithRSA"
+      - "SHA384WithRSA"
+      - "SHA512WithRSA"
+      - "ECDSAWithSHA256"
+      - "ECDSAWithSHA384"
+
+observability:
+  metrics:
+    enabled: true
+    prometheus_port: 9090
+    otlp_endpoint: ""
+  logging:
+    level: "info"
+    format: "json"
+  tracing:
+    enabled: false
+    endpoint: ""

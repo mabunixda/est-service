@@ -1,0 +1,63 @@
+# EST Service Docker Configuration
+# Optimized for containerized deployment with OpenBao
+
+server:
+  listen_address: "0.0.0.0:8443"
+  read_timeout: 15s
+  write_timeout: 15s
+  idle_timeout: 60s
+  rate_limit:
+    enabled: true
+    requests_per_second: 100
+    burst: 200
+  tls:
+    cert_file: "/etc/est/certs/server.crt"
+    key_file: "/etc/est/certs/server.key"
+    client_ca_file: "/etc/est/certs/client-ca.crt"
+    client_auth_type: "request"
+
+# Backend: OpenBao in Docker
+backend:
+  type: "openbao"
+  address: "${OPENBAO_ADDR}"
+  timeout: 30s
+
+est:
+  enabled: true
+  default_mount: "pki"
+
+  labels:
+    devices:
+      type: "role"
+      value: "device-cert"
+
+  default_policy:
+    type: "role"
+    value: "est-devices"
+    ttl: "24h" # 1 day for docker deployments
+
+  # Use authenticated user's token for Vault operations (recommended for production)
+  # When true: Vault audit logs show actual user identity and enforce per-user policies
+  # When false: All requests use EST service token (simpler but less secure)
+  use_authenticated_token: true
+
+  authenticators:
+    userpass:
+      enabled: true
+      mount_path: "userpass"
+    cert:
+      enabled: true
+      mount_path: "cert"
+    token:
+      enabled: true
+
+  csr_validation:
+    max_size_bytes: 32768
+
+observability:
+  metrics:
+    enabled: true
+    prometheus_port: 9090
+  logging:
+    level: "info"
+    format: "json"

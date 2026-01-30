@@ -1,0 +1,56 @@
+# EST Service Development Configuration
+# Minimal config for local testing with OpenBao dev server
+
+# ⚠️  DEVELOPER MODE - Disables TLS requirement (NOT FOR PRODUCTION)
+developer_mode: true
+
+server:
+  listen_address: "127.0.0.1:8443"
+  read_timeout: 15s
+  write_timeout: 15s
+  idle_timeout: 60s
+  rate_limit:
+    enabled: false # Disabled for development
+  tls:
+    # No cert/key files - HTTP mode (allowed only in developer_mode)
+
+# Backend: OpenBao dev server
+backend:
+  # Backend type: "vault", "openbao", or "auto" (default)
+  # - Explicit type (recommended for production): faster, predictable
+  # - "auto" or omit: auto-detects from version endpoint
+  type: "openbao"
+  address: "${BAO_ADDR}"
+  tls_skip_verify: true
+  timeout: 30s
+
+est:
+  enabled: true
+  default_mount: "pki"
+
+  default_policy:
+    type: "role"
+    value: "est-devices"
+    ttl: "2h" # Short TTL for development/testing
+    userpass:
+      enabled: true
+      mount_path: "userpass"
+    cert:
+      enabled: true
+      mount_path: "cert"
+      cert_role: "est-client"
+    token:
+      enabled: true
+
+  csr_validation:
+    max_size_bytes: 32768
+
+observability:
+  metrics:
+    enabled: true
+    prometheus_port: 9090
+  logging:
+    level: "debug"
+    format: "text"
+  tracing:
+    enabled: false

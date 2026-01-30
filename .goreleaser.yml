@@ -1,0 +1,147 @@
+project_name: est-service
+
+before:
+  hooks:
+    - go mod tidy
+    - go mod download
+
+builds:
+  - id: est-service
+    main: ./cmd/est-service
+    binary: est-service
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: arm
+    ldflags:
+      - -s -w
+      - -X github.com/mabunixda/est-service/internal/version.Version={{.Version}}
+      - -X github.com/mabunixda/est-service/internal/version.Commit={{.Commit}}
+      - -X github.com/mabunixda/est-service/internal/version.Date={{.Date}}
+
+archives:
+  - id: default
+    format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - README.md
+      - LICENSE
+      - configs/*.yaml
+
+checksum:
+  name_template: 'checksums.txt'
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^ci:'
+      - '^chore:'
+      - Merge pull request
+      - Merge branch
+  groups:
+    - title: 'New Features'
+      regexp: "^.*feat[(\\w)]*:+.*$"
+      order: 0
+    - title: 'Bug Fixes'
+      regexp: "^.*fix[(\\w)]*:+.*$"
+      order: 1
+    - title: 'Security Updates'
+      regexp: "^.*sec[(\\w)]*:+.*$"
+      order: 2
+    - title: 'Performance Improvements'
+      regexp: "^.*perf[(\\w)]*:+.*$"
+      order: 3
+    - title: 'Other Changes'
+      order: 999
+
+release:
+  github:
+    owner: mabunixda
+    name: est-service
+  draft: false
+  prerelease: auto
+  name_template: "{{.ProjectName}} v{{.Version}}"
+  footer: |
+    ## Installation
+
+    ### Binary
+    Download the appropriate binary for your platform from the assets below.
+
+    ### Docker
+    ```bash
+    docker pull ghcr.io/mabunixda/est-service:{{ .Tag }}
+    ```
+
+    ### Kubernetes
+    Download the kubernetes-manifests tarball and apply with:
+    ```bash
+    tar -xzf kubernetes-manifests-{{ .Version }}.tar.gz
+    kubectl apply -k .
+    ```
+
+dockers:
+  - image_templates:
+      - "ghcr.io/mabunixda/est-service:{{ .Tag }}"
+      - "ghcr.io/mabunixda/est-service:v{{ .Major }}"
+      - "ghcr.io/mabunixda/est-service:v{{ .Major }}.{{ .Minor }}"
+      - "ghcr.io/mabunixda/est-service:latest"
+    dockerfile: deployments/docker/Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--label=org.opencontainers.image.created={{.Date}}"
+      - "--label=org.opencontainers.image.title={{.ProjectName}}"
+      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
+      - "--label=org.opencontainers.image.version={{.Version}}"
+      - "--label=org.opencontainers.image.source={{.GitURL}}"
+      - "--platform=linux/amd64"
+
+nfpms:
+  - id: packages
+    package_name: est-service
+    vendor: mabunixda
+    homepage: https://github.com/mabunixda/est-service
+    maintainer: mabunixda
+    description: RFC 7030 EST (Enrollment over Secure Transport) service
+    license: MIT
+    formats:
+      - deb
+      - rpm
+      - apk
+    bindir: /usr/bin
+    contents:
+      - src: configs/est-service.yaml
+        dst: /etc/est-service/config.yaml
+        type: config
+      - src: README.md
+        dst: /usr/share/doc/est-service/README.md

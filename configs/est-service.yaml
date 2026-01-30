@@ -1,0 +1,86 @@
+# EST Service Production Configuration - OpenBao Backend
+# TLS is required by default. Use developer_mode: true only for local testing.
+
+# developer_mode: false  # Default: false (TLS required)
+
+server:
+  listen_address: "0.0.0.0:8443"
+  read_timeout: 15s
+  write_timeout: 15s
+  idle_timeout: 60s
+  rate_limit:
+    enabled: true
+    requests_per_second: 100 # Per IP address
+    burst: 200
+  tls:
+    cert_file: "/etc/est/server.crt"
+    key_file: "/etc/est/server.key"
+    client_ca_file: "/etc/est/client-ca.crt"
+    client_auth_type: "request" # none, request, require
+
+# Backend configuration (supports both OpenBao and HashiCorp Vault)
+# Type: "openbao", "vault", or "auto" (default)
+#   - Explicit type (recommended): faster startup, no version detection needed
+#   - "auto" or omit: automatically detects from backend version endpoint
+# The service will log the detected/configured backend type on startup
+backend:
+  type: "openbao" # Recommended: explicit type for production
+  address: "https://openbao:8200"
+  namespace: "" # Enterprise feature (Vault Enterprise / OpenBao Enterprise)
+  tls_skip_verify: false # Not recommended for production
+  ca_cert: "/etc/openbao/ca.crt"
+  timeout: 30s
+
+est:
+  enabled: true
+  default_mount: "pki"
+
+  labels:
+    devices:
+      type: "role"
+      value: "device-cert"
+      ttl: "720h" # 30 days
+    users:
+      type: "role"
+      value: "user-cert"
+      ttl: "168h" # 7 days
+    servers:
+      type: "sign-verbatim"
+      ttl: "8760h" # 1 year
+
+  default_policy:
+    type: "role"
+    value: "default-est"
+    ttl: "720h" # 30 days
+
+  authenticators:
+    userpass:
+      enabled: true
+      mount_path: "userpass"
+    cert:
+      enabled: true
+      mount_path: "cert"
+      cert_role: "est-client"
+    token:
+      enabled: true
+
+  csr_validation:
+    max_size_bytes: 32768
+    allowed_signature_algorithms:
+      - "SHA256WithRSA"
+      - "SHA384WithRSA"
+      - "SHA512WithRSA"
+      - "ECDSAWithSHA256"
+      - "ECDSAWithSHA384"
+
+observability:
+  metrics:
+    enabled: true
+    prometheus_port: 9090 # Prometheus scraping endpoint on :9090/metrics
+    otlp_endpoint: "" # Optional: OTLP collector endpoint (e.g., "localhost:4318")
+  logging:
+    level: "info"
+    format: "json"
+  tracing:
+    enabled: false
+    endpoint: ""

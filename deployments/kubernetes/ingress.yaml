@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: est-service
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/ssl-passthrough: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTPS"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - est.example.com
+      secretName: est-service-ingress-tls
+  rules:
+    - host: est.example.com
+      http:
+        paths:
+          - path: /.well-known/est
+            pathType: Prefix
+            backend:
+              service:
+                name: est-service
+                port:
+                  number: 8443
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: est-service
+                port:
+                  number: 8443
+          - path: /ready
+            pathType: Exact
+            backend:
+              service:
+                name: est-service
+                port:
+                  number: 8443

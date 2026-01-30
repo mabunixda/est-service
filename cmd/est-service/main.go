@@ -1,0 +1,214 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
+
+	_ "github.com/mabunixda/est-service/docs" // Swagger docs
+	"github.com/mabunixda/est-service/internal/version"
+	"github.com/mabunixda/est-service/pkg/auth"
+	"github.com/mabunixda/est-service/pkg/backend"
+	"github.com/mabunixda/est-service/pkg/config"
+	"github.com/mabunixda/est-service/pkg/handlers"
+	"github.com/mabunixda/est-service/pkg/observability"
+	"github.com/mabunixda/est-service/pkg/server"
+	"github.com/openbao/openbao/api/v2"
+)
+
+// @title EST Service API
+// @version 1.0.0
+// @description Enrollment over Secure Transport (EST) Service implementing RFC 7030.
+// @description This service provides a standards-compliant EST implementation that uses OpenBao or HashiCorp Vault as the backend PKI system.
+// @description
+// @description **Authentication Methods:**
+// @description - HTTP Basic Auth (mapped to backend userpass)
+// @description - TLS Client Certificates (mapped to backend cert auth)
+// @description - Bearer Token (backend token authentication)
+
+// @contact.name EST Service
+// @contact.url https://github.com/mabunixda/est-service
+
+// @license.name MPL-2.0
+// @license.url https://www.mozilla.org/en-US/MPL/2.0/
+
+// @host localhost:8443
+// @BasePath /
+// @schemes https http
+
+// @tag.name EST
+// @tag.description EST protocol endpoints (RFC 7030)
+// @tag.name Health
+// @tag.description Health and readiness checks
+// @tag.name Metrics
+// @tag.description Observability endpoints
+
+// @securityDefinitions.basic BasicAuth
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+
+func main() {
+	var (
+		configFile  = flag.String("config", "configs/est-service.yaml", "Path to configuration file")
+		showVersion = flag.Bool("version", false, "Show version information")
+	)
+	flag.Parse()
+
+	if *showVersion {
+		fmt.Printf("EST Service %s (commit: %s, built: %s)\n",
+			version.Version, version.GitCommit, version.BuildDate)
+		os.Exit(0)
+	}
+
+	// Load configuration
+	cfg, err := config.Load(*configFile)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Initialize logger
+	logger := observability.SetupLogger(&observability.Config{
+		LogLevel:  cfg.Observability.Logging.Level,
+		LogFormat: cfg.Observability.Logging.Format,
+	})
+	logger.Info("Starting EST Service", "version", version.Version)
+
+	// Warn if in developer mode
+	if cfg.DeveloperMode {
+		logger.Warn("⚠️  DEVELOPER MODE ENABLED - TLS enforcement disabled")
+		logger.Warn("⚠️  This mode is ONLY for local development and testing")
+		logger.Warn("⚠️  NEVER use developer_mode in production environments")
+		if cfg.Server.TLS.CertFile == "" || cfg.Server.TLS.KeyFile == "" {
+			logger.Warn("⚠️  Running without TLS - all traffic is unencrypted")
+		}
+	}
+
+	// Create backend client (OpenBao/Vault)
+	ctx := context.Background()
+
+	// Configure TLS for backend connection
+	var backendTLSConfig *api.TLSConfig
+	if cfg.Backend.CACert != "" || cfg.Backend.ClientCert != "" || cfg.Backend.TLSSkipVerify {
+		backendTLSConfig = &api.TLSConfig{
+			CACert:     cfg.Backend.CACert,
+			ClientCert: cfg.Backend.ClientCert,
+			ClientKey:  cfg.Backend.ClientKey,
+			Insecure:   cfg.Backend.TLSSkipVerify,
+		}
+	}
+
+	backendCfg := &backend.Config{
+		Address:              cfg.Backend.Address,
+		Token:                cfg.Backend.Token,
+		Namespace:            cfg.Backend.Namespace,
+		TLSConfig:            backendTLSConfig,
+		TokenRenewalInterval: cfg.Backend.TokenRenewalInterval,
+		Type:                 backend.BackendType(cfg.Backend.Type), // Pass configured type (or empty for auto-detect)
+	}
+	backendClient, err := backend.NewClient(ctx, backendCfg, logger)
+	if err != nil {
+		logger.Error("Failed to create backend client", "error", err)
+		os.Exit(1)
+	}
+
+	// Configure authentication
+	authCfg := &auth.Config{
+		UserpassEnabled:   cfg.EST.Authenticators.Userpass.Enabled,
+		UserpassMountPath: cfg.EST.Authenticators.Userpass.MountPath,
+		CertEnabled:       cfg.EST.Authenticators.Cert.Enabled,
+		CertMountPath:     cfg.EST.Authenticators.Cert.MountPath,
+		CertRole:          cfg.EST.Authenticators.Cert.CertRole,
+		TokenEnabled:      cfg.EST.Authenticators.Token.Enabled,
+	}
+
+	// Configure enrollment
+	enrollmentCfg := &handlers.EnrollmentConfig{
+		DefaultMount: cfg.EST.DefaultMount,
+		DefaultPolicy: handlers.LabelPolicy{
+			Type:  cfg.EST.DefaultPolicy.Type,
+			Value: cfg.EST.DefaultPolicy.Value,
+			TTL:   cfg.EST.DefaultPolicy.TTL, // Certificate TTL
+		},
+		Labels:     make(map[string]handlers.LabelPolicy),
+		MaxCSRSize: int64(cfg.EST.CSRValidation.MaxSizeBytes),
+	}
+
+	// Convert label configs
+	for name, labelCfg := range cfg.EST.Labels {
+		enrollmentCfg.Labels[name] = handlers.LabelPolicy{
+			Type:  labelCfg.Type,
+			Value: labelCfg.Value,
+			TTL:   labelCfg.TTL, // Certificate TTL for this label
+		}
+	}
+
+	// Create and start server
+	srvCfg := &server.Config{
+		ListenAddr:       cfg.Server.ListenAddress,
+		ReadTimeout:      cfg.Server.ReadTimeout,
+		WriteTimeout:     cfg.Server.WriteTimeout,
+		IdleTimeout:      cfg.Server.IdleTimeout,
+		PKIMount:         cfg.EST.DefaultMount,
+		AuthConfig:       authCfg,
+		EnrollmentConfig: enrollmentCfg,
+	}
+
+	// Configure telemetry (OpenTelemetry)
+	if cfg.Observability.Metrics.Enabled {
+		srvCfg.Telemetry = &server.TelemetryConfig{
+			ServiceName:    "est-service",
+			ServiceVersion: version.Version,
+			PrometheusPort: cfg.Observability.Metrics.PrometheusPort,
+			OTLPEndpoint:   cfg.Observability.Metrics.OTLPEndpoint,
+		}
+	}
+
+	// Configure rate limiting
+	if cfg.Server.RateLimit.Enabled {
+		srvCfg.RateLimit = &server.RateLimitConfig{
+			Enabled:           cfg.Server.RateLimit.Enabled,
+			RequestsPerSecond: cfg.Server.RateLimit.RequestsPerSecond,
+			Burst:             cfg.Server.RateLimit.Burst,
+		}
+	}
+	// Configure TLS if cert/key files are provided
+	if cfg.Server.TLS.CertFile != "" && cfg.Server.TLS.KeyFile != "" {
+		srvCfg.TLSConfig = &server.TLSConfig{
+			CertFile:           cfg.Server.TLS.CertFile,
+			KeyFile:            cfg.Server.TLS.KeyFile,
+			ClientCAFile:       cfg.Server.TLS.ClientCAFile,
+			ClientAuthRequired: cfg.Server.TLS.ClientAuthType == "require",
+		}
+	}
+
+	srv, err := server.New(backendClient, srvCfg, logger)
+	if err != nil {
+		logger.Error("Failed to create server", "error", err)
+		os.Exit(1)
+	}
+
+	// Handle shutdown gracefully
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		logger.Info("Received shutdown signal")
+		cancel()
+	}()
+
+	if err := srv.Start(ctx); err != nil {
+		logger.Error("Server error", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("EST Service stopped")
+}

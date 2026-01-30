@@ -1,0 +1,256 @@
+package handlers
+
+import (
+	"bytes"
+	"context"
+	"crypto/x509"
+	"encoding/base64"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/mabunixda/est-service/pkg/auth"
+	"github.com/mabunixda/est-service/pkg/backend"
+)
+
+// mockTelemetry implements the Telemetry interface for testing
+type mockTelemetry struct{}
+
+func (m *mockTelemetry) RecordAuthSuccess(ctx context.Context, method, identity string)      {}
+func (m *mockTelemetry) RecordAuthFailure(ctx context.Context, method, reason string)        {}
+func (m *mockTelemetry) RecordEnrollmentSuccess(ctx context.Context, label, identity string) {}
+func (m *mockTelemetry) RecordEnrollmentFailure(ctx context.Context, label, reason string)   {}
+func (m *mockTelemetry) RecordCertificateIssued(ctx context.Context, subject string)         {}
+
+func TestSimpleEnrollHandler(t *testing.T) {
+	backendMock := &mockBackendHandlers{}
+	backendClient := &backend.Client{}
+	// Note: We can't directly access the backend field as it's unexported
+	// We need to use NewClient or create a wrapper
+	authMgr := auth.NewManager(backendClient, &auth.Config{
+		UserpassEnabled:   true,
+		UserpassMountPath: "userpass",
+	}, slog.Default())
+
+	config := &EnrollmentConfig{
+		DefaultPKIMount: "pki",
+		DefaultPKIRole:  "est",
+		MaxCSRSize:      10 * 1024 * 1024,
+	}
+
+	handler := NewSimpleEnrollHandler(
+		&backend.Client{Backend: backendMock},
+		authMgr,
+		config,
+		slog.Default(),
+		&mockTelemetry{},
+	)
+
+	csrDER, _, err := generateTestCSR()
+	if err != nil {
+		t.Fatalf("Failed to generate test CSR: %v", err)
+	}
+
+	csrB64 := base64.StdEncoding.EncodeToString(csrDER)
+
+	tests := []struct {
+		name           string
+		method         string
+		body           string
+		auth           string
+		expectedStatus int
+	}{
+		{
+			name:           "successful enrollment with basic auth",
+			method:         "POST",
+			body:           csrB64,
+			auth:           "Basic " + base64.StdEncoding.EncodeToString([]byte("testuser:testpass")),
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "missing authentication",
+			method:         "POST",
+			body:           csrB64,
+			auth:           "",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "invalid method",
+			method:         "GET",
+			body:           "",
+			auth:           "Basic " + base64.StdEncoding.EncodeToString([]byte("testuser:testpass")),
+			expectedStatus: http.StatusMethodNotAllowed,
+		},
+		{
+			name:           "invalid CSR",
+			method:         "POST",
+			body:           "invalid-base64",
+			auth:           "Basic " + base64.StdEncoding.EncodeToString([]byte("testuser:testpass")),
+			expectedStatus: http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, "/.well-known/est/simpleenroll", bytes.NewReader([]byte(tt.body)))
+			if tt.auth != "" {
+				req.Header.Set("Authorization", tt.auth)
+			}
+			req.Header.Set("Content-Type", "application/pkcs10")
+
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != tt.expectedStatus {
+				t.Errorf("Status = %d, want %d", w.Code, tt.expectedStatus)
+			}
+
+			if w.Code == http.StatusOK {
+				contentType := w.Header().Get("Content-Type")
+				if contentType != "application/pkcs7-mime; smime-type=certs-only" {
+					t.Errorf("Content-Type = %s, want application/pkcs7-mime", contentType)
+				}
+			}
+		})
+	}
+}
+
+func TestSimpleEnrollWithBearerToken(t *testing.T) {
+	backendMock := &mockBackendHandlers{
+		validateTokenFunc: func(ctx context.Context, token string) (bool, error) {
+			return token == "valid-token", nil
+		},
+	}
+
+	authMgr := auth.NewManager(&auth.Config{
+		EnabledMethods: []string{"bearer"},
+		BearerConfig: &auth.BearerConfig{
+			Enabled: true,
+		},
+	}, backendMock, slog.Default())
+
+	config := &EnrollmentConfig{
+		PKIMount:   "pki",
+		PKIRole:    "est",
+		MaxCSRSize: 10 * 1024 * 1024,
+	}
+
+	handler := NewSimpleEnrollHandler(
+		&backend.Client{Backend: backend},
+		authMgr,
+		config,
+		slog.Default(),
+		&mockTelemetry{},
+	)
+
+	csrDER, _, _ := generateTestCSR()
+	csrB64 := base64.StdEncoding.EncodeToString(csrDER)
+
+	req := httptest.NewRequest("POST", "/.well-known/est/simpleenroll", bytes.NewReader([]byte(csrB64)))
+	req.Header.Set("Authorization", "Bearer valid-token")
+	req.Header.Set("Content-Type", "application/pkcs10")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+}
+
+func TestSimpleEnrollWithLabel(t *testing.T) {
+	backendMock := &mockBackendHandlers{}
+	authMgr := auth.NewManager(&auth.Config{
+		EnabledMethods: []string{"basic"},
+		UserpassConfig: &auth.UserpassConfig{
+			Enabled: true,
+		},
+	}, backendMock, slog.Default())
+
+	config := &EnrollmentConfig{
+		PKIMount:   "pki",
+		PKIRole:    "est",
+		MaxCSRSize: 10 * 1024 * 1024,
+		LabelPolicies: []LabelPolicy{
+			{
+				Label:   "custom-label",
+				PKIRole: "custom-role",
+			},
+		},
+	}
+
+	handler := NewSimpleEnrollHandler(
+		&backend.Client{Backend: backend},
+		authMgr,
+		config,
+		slog.Default(),
+		&mockTelemetry{},
+	)
+
+	csrDER, _, _ := generateTestCSR()
+	csrB64 := base64.StdEncoding.EncodeToString(csrDER)
+
+	req := httptest.NewRequest("POST", "/.well-known/est/custom-label/simpleenroll", bytes.NewReader([]byte(csrB64)))
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("testuser:testpass")))
+	req.Header.Set("Content-Type", "application/pkcs10")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d. Body: %s", w.Code, http.StatusOK, w.Body.String())
+	}
+}
+
+func TestSimpleEnrollWithTTLOverride(t *testing.T) {
+	signedWithTTL := ""
+	backendMock := &mockBackendHandlers{
+		signCSRFunc: func(ctx context.Context, mount, role string, csr *x509.CertificateRequest, ttl string) (*x509.Certificate, error) {
+			signedWithTTL = ttl
+			return generateTestCertFromCSR(csr)
+		},
+	}
+
+	authMgr := auth.NewManager(&auth.Config{
+		EnabledMethods: []string{"basic"},
+		UserpassConfig: &auth.UserpassConfig{
+			Enabled: true,
+		},
+	}, backendMock, slog.Default())
+
+	config := &EnrollmentConfig{
+		PKIMount:    "pki",
+		PKIRole:     "est",
+		MaxCSRSize:  10 * 1024 * 1024,
+		DefaultTTL:  "720h",
+		AllowedTTLs: []string{"24h", "168h", "720h"},
+	}
+
+	handler := NewSimpleEnrollHandler(
+		&backend.Client{Backend: backend},
+		authMgr,
+		config,
+		slog.Default(),
+		&mockTelemetry{},
+	)
+
+	csrDER, _, _ := generateTestCSR()
+	csrB64 := base64.StdEncoding.EncodeToString(csrDER)
+
+	req := httptest.NewRequest("POST", "/.well-known/est/simpleenroll", bytes.NewReader([]byte(csrB64)))
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("testuser:testpass")))
+	req.Header.Set("Content-Type", "application/pkcs10")
+	req.Header.Set("X-EST-TTL", "168h")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Status = %d, want %d", w.Code, http.StatusOK)
+	}
+
+	if signedWithTTL != "168h" {
+		t.Errorf("CSR signed with TTL = %s, want 168h", signedWithTTL)
+	}
+}

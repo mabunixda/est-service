@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: est-service
+  labels:
+    app: est-service
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+spec:
+  type: ClusterIP
+  selector:
+    app: est-service
+  ports:
+    - name: https
+      port: 8443
+      targetPort: 8443
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
+  sessionAffinity: ClientIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: est-service-metrics
+  labels:
+    app: est-service
+spec:
+  type: ClusterIP
+  selector:
+    app: est-service
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
