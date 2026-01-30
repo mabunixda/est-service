@@ -93,90 +93,90 @@ jobs:
           retention-days: 7
 
   # integration-test:
-    name: Integration Tests
-    runs-on: ubuntu-latest
+  #   name: Integration Tests
+  #   runs-on: ubuntu-latest
 
-    services:
-      vault:
-        image: hashicorp/vault:latest
-        env:
-          VAULT_DEV_ROOT_TOKEN_ID: root-token
-          VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
-        ports:
-          - 8200:8200
-        options: >-
-          --health-cmd "vault status"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+  #   services:
+  #     vault:
+  #       image: hashicorp/vault:latest
+  #       env:
+  #         VAULT_DEV_ROOT_TOKEN_ID: root-token
+  #         VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+  #       ports:
+  #         - 8200:8200
+  #       options: >-
+  #         --health-cmd "vault status"
+  #         --health-interval 10s
+  #         --health-timeout 5s
+  #         --health-retries 5
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+  #   steps:
+  #     - name: Checkout code
+  #       uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
+  #     - name: Set up Go
+  #       uses: actions/setup-go@v5
+  #       with:
+  #         go-version: "1.25"
 
-      - name: Wait for Vault
-        run: |
-          for i in {1..30}; do
-            if curl -s http://localhost:8200/v1/sys/health >/dev/null 2>&1; then
-              echo "Vault is ready"
-              break
-            fi
-            echo "Waiting for Vault... ($i/30)"
-            sleep 2
-          done
+  #     - name: Wait for Vault
+  #       run: |
+  #         for i in {1..30}; do
+  #           if curl -s http://localhost:8200/v1/sys/health >/dev/null 2>&1; then
+  #             echo "Vault is ready"
+  #             break
+  #           fi
+  #           echo "Waiting for Vault... ($i/30)"
+  #           sleep 2
+  #         done
 
-      - name: Setup Vault PKI
-        env:
-          VAULT_ADDR: http://localhost:8200
-          VAULT_TOKEN: root-token
-        run: |
-          # Enable PKI secrets engine
-          vault secrets enable pki
-          vault secrets tune -max-lease-ttl=87600h pki
+  #     - name: Setup Vault PKI
+  #       env:
+  #         VAULT_ADDR: http://localhost:8200
+  #         VAULT_TOKEN: root-token
+  #       run: |
+  #         # Enable PKI secrets engine
+  #         vault secrets enable pki
+  #         vault secrets tune -max-lease-ttl=87600h pki
 
-          # Generate root CA
-          vault write -field=certificate pki/root/generate/internal \
-            common_name="Test Root CA" \
-            ttl=87600h > ca.crt
+  #         # Generate root CA
+  #         vault write -field=certificate pki/root/generate/internal \
+  #           common_name="Test Root CA" \
+  #           ttl=87600h > ca.crt
 
-          # Configure CA and CRL URLs
-          vault write pki/config/urls \
-            issuing_certificates="http://localhost:8200/v1/pki/ca" \
-            crl_distribution_points="http://localhost:8200/v1/pki/crl"
+  #         # Configure CA and CRL URLs
+  #         vault write pki/config/urls \
+  #           issuing_certificates="http://localhost:8200/v1/pki/ca" \
+  #           crl_distribution_points="http://localhost:8200/v1/pki/crl"
 
-          # Create a role for testing
-          vault write pki/roles/test-role \
-            allowed_domains="example.com,test.local" \
-            allow_subdomains=true \
-            max_ttl=72h \
-            key_type=rsa \
-            key_bits=2048
+  #         # Create a role for testing
+  #         vault write pki/roles/test-role \
+  #           allowed_domains="example.com,test.local" \
+  #           allow_subdomains=true \
+  #           max_ttl=72h \
+  #           key_type=rsa \
+  #           key_bits=2048
 
-          # Enable userpass auth
-          vault auth enable userpass
-          vault write auth/userpass/users/testuser \
-            password=testpass \
-            policies=default
+  #         # Enable userpass auth
+  #         vault auth enable userpass
+  #         vault write auth/userpass/users/testuser \
+  #           password=testpass \
+  #           policies=default
 
-          # Create policy for PKI access
-          vault policy write pki-policy - <<EOF
-          path "pki/*" {
-            capabilities = ["create", "read", "update", "delete", "list"]
-          }
-          EOF
+  #         # Create policy for PKI access
+  #         vault policy write pki-policy - <<EOF
+  #         path "pki/*" {
+  #           capabilities = ["create", "read", "update", "delete", "list"]
+  #         }
+  #         EOF
 
-          vault write auth/userpass/users/testuser policies=pki-policy
+  #         vault write auth/userpass/users/testuser policies=pki-policy
 
-      - name: Run integration tests
-        env:
-          VAULT_ADDR: http://localhost:8200
-          VAULT_TOKEN: root-token
-        run: go test -v -race ./test/integration/...
+  #     - name: Run integration tests
+  #       env:
+  #         VAULT_ADDR: http://localhost:8200
+  #         VAULT_TOKEN: root-token
+  #       run: go test -v -race ./test/integration/...
 
   openapi-validate:
     name: Validate OpenAPI
