@@ -42,10 +42,10 @@ jobs:
         with:
           args: "-no-fail -fmt sarif -out results.sarif ./..."
 
-      - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: results.sarif
+      # - name: Upload SARIF file
+      #   uses: github/codeql-action/upload-sarif@v3
+      #   with:
+      #     sarif_file: results.sarif
 
   trivy-scan:
     name: Trivy Security Scan
@@ -66,10 +66,10 @@ jobs:
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH"
 
-      - name: Upload Trivy results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: "trivy-results.sarif"
+      # - name: Upload Trivy results to GitHub Security tab
+      #   uses: github/codeql-action/upload-sarif@v3
+      #   with:
+      #     sarif_file: "trivy-results.sarif"
 
   dependency-review:
     name: Dependency Review
