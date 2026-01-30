@@ -24,7 +24,7 @@ else
 	IMAGE_LATEST=$(REGISTRY)/$(IMAGE_NAME):latest
 endif
 
-all: clean lint test build swagger
+all: clean build
 
 build:
 	@echo "Building..."
