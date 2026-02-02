@@ -1,0 +1,6 @@
+[tools]
+go = "latest"
+golangci-lint = "latest"
+goreleaser = "latest"
+spectral = "latest"
+swag = "latest"
