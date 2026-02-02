@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-// TestNewTelemetry_Disabled tests telemetry initialization with all exporters disabled
-func TestNewTelemetry_Disabled(t *testing.T) {
+// TestTelemetry_Disabled tests telemetry initialization with all exporters disabled
+func TestTelemetry_Disabled(t *testing.T) {
 	cfg := &TelemetryConfig{
 		ServiceName:    "test-service",
 		ServiceVersion: "1.0.0",
@@ -34,8 +34,8 @@ func TestNewTelemetry_Disabled(t *testing.T) {
 	}
 }
 
-// TestNewTelemetry_WithPrometheus tests telemetry with Prometheus enabled
-func TestNewTelemetry_WithPrometheus(t *testing.T) {
+// TestTelemetry_WithPrometheus tests telemetry with Prometheus enabled
+func TestTelemetry_WithPrometheus(t *testing.T) {
 	cfg := &TelemetryConfig{
 		ServiceName:    "test-service",
 		ServiceVersion: "1.0.0",
@@ -63,8 +63,8 @@ func TestNewTelemetry_WithPrometheus(t *testing.T) {
 	}
 }
 
-// TestNewTelemetry_NilLogger tests that nil logger doesn't cause panic
-func TestNewTelemetry_NilLogger(t *testing.T) {
+// TestTelemetry_NilLogger tests that nil logger doesn't cause panic
+func TestTelemetry_NilLogger(t *testing.T) {
 	cfg := &TelemetryConfig{
 		ServiceName:    "test-service",
 		ServiceVersion: "1.0.0",

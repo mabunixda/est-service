@@ -139,7 +139,7 @@ func newMockBackendClient(mock *mockBackend) *backend.Client {
 	return &backend.Client{}
 }
 
-func TestNew(t *testing.T) {
+func TestServerCreation(t *testing.T) {
 	tests := []struct {
 		name      string
 		config    *Config
@@ -786,7 +786,7 @@ func TestCheckCertificateExpiry_ExpiredCert(t *testing.T) {
 	}
 }
 
-func TestNew_ExpiredCertFails(t *testing.T) {
+func TestExpiredCertFailsOnStart(t *testing.T) {
 	certFile, keyFile, cleanup := createTestCertFilesWithExpiry(t, -24*time.Hour) // Expired 1 day ago
 	defer cleanup()
 

@@ -222,8 +222,8 @@ func TestDetectBackendType_CaseSensitivity(t *testing.T) {
 	}
 }
 
-// TestNewBackend_VaultType tests explicit Vault backend creation
-func TestNewBackend_VaultType(t *testing.T) {
+// TestBackend_VaultType tests explicit Vault backend creation
+func TestBackend_VaultType(t *testing.T) {
 	// Create a mock server that responds to health checks (required for initialization)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/sys/health" {
@@ -259,8 +259,8 @@ func TestNewBackend_VaultType(t *testing.T) {
 	}
 }
 
-// TestNewBackend_OpenBaoType tests explicit OpenBao backend creation
-func TestNewBackend_OpenBaoType(t *testing.T) {
+// TestBackend_OpenBaoType tests explicit OpenBao backend creation
+func TestBackend_OpenBaoType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/sys/health" {
 			health := api.HealthResponse{
@@ -295,8 +295,8 @@ func TestNewBackend_OpenBaoType(t *testing.T) {
 	}
 }
 
-// TestNewBackend_AutoDetection tests automatic backend type detection
-func TestNewBackend_AutoDetection(t *testing.T) {
+// TestBackend_AutoDetection tests automatic backend type detection
+func TestBackend_AutoDetection(t *testing.T) {
 	healthCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/sys/health" {
@@ -337,8 +337,8 @@ func TestNewBackend_AutoDetection(t *testing.T) {
 	}
 }
 
-// TestNewBackend_EmptyType tests that empty type defaults to auto-detection
-func TestNewBackend_EmptyType(t *testing.T) {
+// TestBackend_EmptyType tests that empty type defaults to auto-detection
+func TestBackend_EmptyType(t *testing.T) {
 	healthCalled := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/sys/health" {
@@ -379,8 +379,8 @@ func TestNewBackend_EmptyType(t *testing.T) {
 	}
 }
 
-// TestNewBackend_InvalidType tests error handling for unsupported backend types
-func TestNewBackend_InvalidType(t *testing.T) {
+// TestBackend_InvalidType tests error handling for unsupported backend types
+func TestBackend_InvalidType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Error("Should not call any endpoints for invalid type")
 	}))
@@ -407,8 +407,8 @@ func TestNewBackend_InvalidType(t *testing.T) {
 	}
 }
 
-// TestNewBackend_NilLogger tests that nil logger doesn't cause panic
-func TestNewBackend_NilLogger(t *testing.T) {
+// TestBackend_NilLogger tests that nil logger doesn't cause panic
+func TestBackend_NilLogger(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/sys/health" {
 			health := api.HealthResponse{

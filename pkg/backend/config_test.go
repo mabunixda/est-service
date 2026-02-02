@@ -173,8 +173,8 @@ func TestBackendType_String(t *testing.T) {
 	}
 }
 
-// TestNewBackend_UnsupportedType tests error handling for unsupported backend types
-func TestNewBackend_UnsupportedType(t *testing.T) {
+// TestBackend_UnsupportedType tests error handling for unsupported backend types
+func TestBackend_UnsupportedType(t *testing.T) {
 	cfg := &Config{
 		Address: "https://vault.example.com",
 		Token:   "test-token",

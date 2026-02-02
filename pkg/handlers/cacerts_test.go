@@ -177,7 +177,7 @@ func generateTestCert(subject pkix.Name) (*x509.Certificate, error) {
 	return x509.ParseCertificate(certDER)
 }
 
-func TestNewCACertsHandler(t *testing.T) {
+func TestCACertsHandler(t *testing.T) {
 	client := &backend.Client{}
 	logger := slog.Default()
 
@@ -197,7 +197,7 @@ func TestNewCACertsHandler(t *testing.T) {
 	}
 }
 
-func TestNewCACertsHandler_NilLogger(t *testing.T) {
+func TestCACertsHandler_NilLogger(t *testing.T) {
 	client := &backend.Client{}
 
 	handler := NewCACertsHandler(client, "pki", nil)

@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestNewManager(t *testing.T) {
+func TestManager(t *testing.T) {
 	tests := []struct {
 		name               string
 		config             *Config
@@ -53,7 +53,7 @@ func TestNewManager(t *testing.T) {
 	}
 }
 
-func TestNewManager_NilLogger(t *testing.T) {
+func TestManager_NilLogger(t *testing.T) {
 	mgr := NewManager(nil, &Config{}, nil)
 
 	if mgr.logger == nil {

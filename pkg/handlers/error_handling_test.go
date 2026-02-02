@@ -11,8 +11,8 @@ import (
 	"github.com/mabunixda/est-service/pkg/backend"
 )
 
-// TestNewSimpleEnrollHandler tests handler creation
-func TestNewSimpleEnrollHandler(t *testing.T) {
+// TestSimpleEnrollHandler tests handler creation
+func TestSimpleEnrollHandler(t *testing.T) {
 	authMgr := auth.NewManager(&backend.Client{}, &auth.Config{
 		UserpassEnabled:   true,
 		UserpassMountPath: "userpass",
@@ -40,8 +40,8 @@ func TestNewSimpleEnrollHandler(t *testing.T) {
 	}
 }
 
-// TestNewSimpleReenrollHandler tests handler creation
-func TestNewSimpleReenrollHandler(t *testing.T) {
+// TestSimpleReenrollHandler tests handler creation
+func TestSimpleReenrollHandler(t *testing.T) {
 	authMgr := auth.NewManager(&backend.Client{}, &auth.Config{
 		UserpassEnabled:   true,
 		UserpassMountPath: "userpass",
