@@ -1,13 +1,13 @@
 services:
   # OpenBao backend
   openbao:
-    image: hashicorp/vault:latest
+    image: openbao/openbao:latest
     container_name: est-openbao
     ports:
       - "8200:8200"
     environment:
-      VAULT_DEV_ROOT_TOKEN_ID: "root"
-      VAULT_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      BAO_DEV_ROOT_TOKEN_ID: "root"
+      BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
     cap_add:
       - IPC_LOCK
     # healthcheck:
