@@ -22,7 +22,7 @@ func TestCACertsHandler_Creation(t *testing.T) {
 	}
 }
 
-// TestCACertsHandler_EmptyCertificateList tests handling of empty certificate lists
+// TestCACertsHandler_NilLogger tests handling nil logger parameter
 func TestCACertsHandler_NilLogger(t *testing.T) {
 	handler := NewCACertsHandler(&backend.Client{}, "pki", nil)
 	if handler.logger == nil {

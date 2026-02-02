@@ -39,6 +39,10 @@ type Telemetry struct {
 	certIssuedCounter   metric.Int64Counter
 	certRejectedCounter metric.Int64Counter
 
+	// Backend Metrics
+	backendRequestCounter  metric.Int64Counter
+	backendRequestDuration metric.Float64Histogram
+
 	// Server Certificate Monitoring
 	certExpiryGauge metric.Float64Gauge
 }
@@ -138,7 +142,7 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 
 	// Initialize counters
 	if t.requestCounter, err = meter.Int64Counter(
-		"est.requests.total",
+		"est_requests_total",
 		metric.WithDescription("Total number of HTTP requests"),
 		metric.WithUnit("{request}"),
 	); err != nil {
@@ -146,7 +150,7 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 	}
 
 	if t.caCertsCounter, err = meter.Int64Counter(
-		"est.cacerts.total",
+		"est_cacerts_total",
 		metric.WithDescription("Total number of CA certs requests"),
 		metric.WithUnit("{request}"),
 	); err != nil {
@@ -154,7 +158,7 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 	}
 
 	if t.enrollmentCounter, err = meter.Int64Counter(
-		"est.enrollment.total",
+		"est_enrollment_total",
 		metric.WithDescription("Total number of enrollment requests"),
 		metric.WithUnit("{request}"),
 	); err != nil {
@@ -162,7 +166,7 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 	}
 
 	if t.reenrollmentCounter, err = meter.Int64Counter(
-		"est.reenrollment.total",
+		"est_reenrollment_total",
 		metric.WithDescription("Total number of re-enrollment requests"),
 		metric.WithUnit("{request}"),
 	); err != nil {
@@ -170,7 +174,7 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 	}
 
 	if t.errorCounter, err = meter.Int64Counter(
-		"est.errors.total",
+		"est_errors_total",
 		metric.WithDescription("Total number of errors"),
 		metric.WithUnit("{error}"),
 	); err != nil {
@@ -178,7 +182,7 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 	}
 
 	if t.rateLimitCounter, err = meter.Int64Counter(
-		"est.rate_limit.total",
+		"est_rate_limit_total",
 		metric.WithDescription("Total number of rate-limited requests"),
 		metric.WithUnit("{request}"),
 	); err != nil {
@@ -187,7 +191,7 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 
 	// Authentication metrics
 	if t.authSuccessCounter, err = meter.Int64Counter(
-		"est.auth.success.total",
+		"est_auth_success_total",
 		metric.WithDescription("Total number of successful authentications"),
 		metric.WithUnit("{authentication}"),
 	); err != nil {
@@ -195,7 +199,7 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 	}
 
 	if t.authFailureCounter, err = meter.Int64Counter(
-		"est.auth.failure.total",
+		"est_auth_failure_total",
 		metric.WithDescription("Total number of failed authentications"),
 		metric.WithUnit("{authentication}"),
 	); err != nil {
@@ -204,7 +208,7 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 
 	// Certificate metrics
 	if t.certIssuedCounter, err = meter.Int64Counter(
-		"est.certificates.issued.total",
+		"est_certificates_issued_total",
 		metric.WithDescription("Total number of certificates issued"),
 		metric.WithUnit("{certificate}"),
 	); err != nil {
@@ -212,25 +216,42 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 	}
 
 	if t.certRejectedCounter, err = meter.Int64Counter(
-		"est.certificates.rejected.total",
+		"est_certificates_rejected_total",
 		metric.WithDescription("Total number of certificate requests rejected"),
 		metric.WithUnit("{request}"),
 	); err != nil {
 		return nil, err
 	}
 
-	// Initialize histogram
+	// Backend metrics
+	if t.backendRequestCounter, err = meter.Int64Counter(
+		"est_backend_requests_total",
+		metric.WithDescription("Total number of backend API requests"),
+		metric.WithUnit("{request}"),
+	); err != nil {
+		return nil, err
+	}
+
+	// Initialize histograms
 	if t.requestDuration, err = meter.Float64Histogram(
-		"est.request.duration",
-		metric.WithDescription("HTTP request duration"),
-		metric.WithUnit("ms"),
+		"est_request_duration_seconds",
+		metric.WithDescription("HTTP request duration in seconds"),
+		metric.WithUnit("s"),
+	); err != nil {
+		return nil, err
+	}
+
+	if t.backendRequestDuration, err = meter.Float64Histogram(
+		"est_backend_request_duration_seconds",
+		metric.WithDescription("Backend API request duration in seconds"),
+		metric.WithUnit("s"),
 	); err != nil {
 		return nil, err
 	}
 
 	// Initialize up/down counter
 	if t.activeConnections, err = meter.Int64UpDownCounter(
-		"est.connections.active",
+		"est_connections_active",
 		metric.WithDescription("Number of active connections"),
 		metric.WithUnit("{connection}"),
 	); err != nil {
@@ -239,7 +260,7 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 
 	// Server certificate expiry gauge
 	if t.certExpiryGauge, err = meter.Float64Gauge(
-		"est.server.cert.expiry_days",
+		"est_server_cert_expiry_days",
 		metric.WithDescription("Days until server TLS certificate expires"),
 		metric.WithUnit("d"),
 	); err != nil {
@@ -259,7 +280,7 @@ func (t *Telemetry) RecordRequest(ctx context.Context, method, path string, stat
 	}
 
 	t.requestCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
-	t.requestDuration.Record(ctx, float64(duration.Milliseconds()), metric.WithAttributes(attrs...))
+	t.requestDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(attrs...))
 
 	if statusCode >= 400 {
 		t.errorCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
@@ -327,4 +348,14 @@ func (t *Telemetry) RecordCertificateRejected(ctx context.Context, operation, re
 // RecordCertificateExpiry records the days until server TLS certificate expires
 func (t *Telemetry) RecordCertificateExpiry(ctx context.Context, daysRemaining float64) {
 	t.certExpiryGauge.Record(ctx, daysRemaining)
+}
+
+// RecordBackendRequest records a backend API request with its duration
+func (t *Telemetry) RecordBackendRequest(ctx context.Context, operation string, statusCode int, duration time.Duration) {
+	attrs := []attribute.KeyValue{
+		attribute.String("backend.operation", operation),
+		attribute.Int("backend.status_code", statusCode),
+	}
+	t.backendRequestCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+	t.backendRequestDuration.Record(ctx, duration.Seconds(), metric.WithAttributes(attrs...))
 }

@@ -197,19 +197,6 @@ func TestCACertsHandler(t *testing.T) {
 	}
 }
 
-func TestCACertsHandler_NilLogger(t *testing.T) {
-	client := &backend.Client{}
-
-	handler := NewCACertsHandler(client, "pki", nil)
-
-	if handler == nil {
-		t.Fatal("Expected non-nil handler")
-	}
-	if handler.logger == nil {
-		t.Error("Expected default logger to be set")
-	}
-}
-
 func TestCACertsHandler_InvalidMethod(t *testing.T) {
 	client := &backend.Client{}
 	handler := NewCACertsHandler(client, "pki", slog.Default())
