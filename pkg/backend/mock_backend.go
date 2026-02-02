@@ -22,6 +22,7 @@ type MockBackend struct {
 
 	// Authentication Operations
 	AuthenticateUserpassFunc func(ctx context.Context, mount, username, password string) (string, error)
+	AuthenticateLDAPFunc     func(ctx context.Context, mount, username, password string) (string, error)
 	AuthenticateAppRoleFunc  func(ctx context.Context, mount, roleID, secretID string) (string, error)
 	AuthenticateCertFunc     func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error)
 	ValidateTokenFunc        func(ctx context.Context, token string) (bool, error)
@@ -100,6 +101,14 @@ func (m *MockBackend) AuthenticateUserpass(ctx context.Context, mount, username,
 	return "", nil
 }
 
+// AuthenticateLDAP implements Backend.AuthenticateLDAP
+func (m *MockBackend) AuthenticateLDAP(ctx context.Context, mount, username, password string) (string, error) {
+	if m.AuthenticateLDAPFunc != nil {
+		return m.AuthenticateLDAPFunc(ctx, mount, username, password)
+	}
+	return "", nil
+}
+
 // AuthenticateAppRole implements Backend.AuthenticateAppRole
 func (m *MockBackend) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
 	if m.AuthenticateAppRoleFunc != nil {
@@ -169,6 +178,7 @@ func (m *MockBackend) CloneWithToken(ctx context.Context, token string) (Backend
 		SignCSRVerbatimFunc:      m.SignCSRVerbatimFunc,
 		GetIssuerPEMFunc:         m.GetIssuerPEMFunc,
 		AuthenticateUserpassFunc: m.AuthenticateUserpassFunc,
+		AuthenticateLDAPFunc:     m.AuthenticateLDAPFunc,
 		AuthenticateAppRoleFunc:  m.AuthenticateAppRoleFunc,
 		AuthenticateCertFunc:     m.AuthenticateCertFunc,
 		ValidateTokenFunc:        m.ValidateTokenFunc,

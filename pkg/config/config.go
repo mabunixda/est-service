@@ -88,6 +88,7 @@ type PolicyConfig struct {
 // AuthenticatorsConfig configures authentication methods
 type AuthenticatorsConfig struct {
 	Userpass UserpassAuthConfig `yaml:"userpass"`
+	LDAP     LDAPAuthConfig     `yaml:"ldap"`
 	AppRole  AppRoleAuthConfig  `yaml:"approle"`
 	Cert     CertAuthConfig     `yaml:"cert"`
 	Token    TokenAuthConfig    `yaml:"token"`
@@ -95,6 +96,12 @@ type AuthenticatorsConfig struct {
 
 // UserpassAuthConfig configures userpass authentication
 type UserpassAuthConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	MountPath string `yaml:"mount_path"`
+}
+
+// LDAPAuthConfig configures LDAP authentication
+type LDAPAuthConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 	MountPath string `yaml:"mount_path"`
 }

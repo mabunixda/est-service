@@ -16,6 +16,7 @@ func TestManager(t *testing.T) {
 		name               string
 		config             *Config
 		expectUserpassPath string
+		expectLDAPPath     string
 		expectCertPath     string
 		expectAppRolePath  string
 	}{
@@ -23,6 +24,7 @@ func TestManager(t *testing.T) {
 			name:               "default mount paths",
 			config:             &Config{},
 			expectUserpassPath: "userpass",
+			expectLDAPPath:     "ldap",
 			expectCertPath:     "cert",
 			expectAppRolePath:  "approle",
 		},
@@ -30,10 +32,12 @@ func TestManager(t *testing.T) {
 			name: "custom mount paths",
 			config: &Config{
 				UserpassMountPath: "custom-userpass",
+				LDAPMountPath:     "custom-ldap",
 				CertMountPath:     "custom-cert",
 				AppRoleMountPath:  "custom-approle",
 			},
 			expectUserpassPath: "custom-userpass",
+			expectLDAPPath:     "custom-ldap",
 			expectCertPath:     "custom-cert",
 			expectAppRolePath:  "custom-approle",
 		},
@@ -46,6 +50,11 @@ func TestManager(t *testing.T) {
 			if mgr.config.UserpassMountPath != tt.expectUserpassPath {
 				t.Errorf("Expected UserpassMountPath '%s', got '%s'",
 					tt.expectUserpassPath, mgr.config.UserpassMountPath)
+			}
+
+			if mgr.config.LDAPMountPath != tt.expectLDAPPath {
+				t.Errorf("Expected LDAPMountPath '%s', got '%s'",
+					tt.expectLDAPPath, mgr.config.LDAPMountPath)
 			}
 
 			if mgr.config.CertMountPath != tt.expectCertPath {
@@ -244,6 +253,99 @@ func TestAuthenticateBasic_AppRoleSuccess(t *testing.T) {
 
 	if !result.Authenticated {
 		t.Error("Expected authentication to succeed with AppRole")
+	}
+	if result.Method != "approle" {
+		t.Errorf("Expected method 'approle', got '%s'", result.Method)
+	}
+}
+
+func TestAuthenticateBasic_LDAPSuccess(t *testing.T) {
+	mock := &backend.MockBackend{
+		AuthenticateLDAPFunc: func(ctx context.Context, mount, username, password string) (string, error) {
+			if mount != "ldap" {
+				return "", errors.New("unexpected mount")
+			}
+			if username == "ldapuser" && password == "ldappass" {
+				return "ldap-token-123", nil
+			}
+			return "", errors.New("invalid credentials")
+		},
+	}
+
+	mgr := NewManager(mock, &Config{LDAPEnabled: true, LDAPMountPath: "ldap"}, slog.Default())
+
+	req := httptest.NewRequest("GET", "/", nil)
+	creds := base64.StdEncoding.EncodeToString([]byte("ldapuser:ldappass"))
+	req.Header.Set("Authorization", "Basic "+creds)
+
+	result := mgr.authenticateBasic(context.Background(), req)
+
+	if !result.Authenticated {
+		t.Error("Expected authentication to succeed with LDAP")
+	}
+	if result.Method != "ldap" {
+		t.Errorf("Expected method 'ldap', got '%s'", result.Method)
+	}
+	if result.Token != "ldap-token-123" {
+		t.Errorf("Expected token 'ldap-token-123', got '%s'", result.Token)
+	}
+	if result.Identity != "ldapuser" {
+		t.Errorf("Expected identity 'ldapuser', got '%s'", result.Identity)
+	}
+}
+
+func TestAuthenticateBasic_UserpassFails_LDAPSucceeds(t *testing.T) {
+	mock := &backend.MockBackend{
+		AuthenticateUserpassFunc: func(ctx context.Context, mount, username, password string) (string, error) {
+			return "", errors.New("userpass failed")
+		},
+		AuthenticateLDAPFunc: func(ctx context.Context, mount, username, password string) (string, error) {
+			return "ldap-token-456", nil
+		},
+	}
+
+	mgr := NewManager(mock, &Config{
+		UserpassEnabled: true,
+		LDAPEnabled:     true,
+	}, slog.Default())
+
+	req := httptest.NewRequest("GET", "/", nil)
+	creds := base64.StdEncoding.EncodeToString([]byte("ldapuser:ldappass"))
+	req.Header.Set("Authorization", "Basic "+creds)
+
+	result := mgr.authenticateBasic(context.Background(), req)
+
+	if !result.Authenticated {
+		t.Error("Expected authentication to succeed via LDAP fallback")
+	}
+	if result.Method != "ldap" {
+		t.Errorf("Expected method 'ldap', got '%s'", result.Method)
+	}
+}
+
+func TestAuthenticateBasic_LDAPFails_AppRoleSucceeds(t *testing.T) {
+	mock := &backend.MockBackend{
+		AuthenticateLDAPFunc: func(ctx context.Context, mount, username, password string) (string, error) {
+			return "", errors.New("LDAP auth failed")
+		},
+		AuthenticateAppRoleFunc: func(ctx context.Context, mount, roleID, secretID string) (string, error) {
+			return "approle-token-789", nil
+		},
+	}
+
+	mgr := NewManager(mock, &Config{
+		LDAPEnabled:    true,
+		AppRoleEnabled: true,
+	}, slog.Default())
+
+	req := httptest.NewRequest("GET", "/", nil)
+	creds := base64.StdEncoding.EncodeToString([]byte("role-id:secret-id"))
+	req.Header.Set("Authorization", "Basic "+creds)
+
+	result := mgr.authenticateBasic(context.Background(), req)
+
+	if !result.Authenticated {
+		t.Error("Expected authentication to succeed via AppRole fallback")
 	}
 	if result.Method != "approle" {
 		t.Errorf("Expected method 'approle', got '%s'", result.Method)

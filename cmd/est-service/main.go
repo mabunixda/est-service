@@ -27,7 +27,7 @@ import (
 // @description This service provides a standards-compliant EST implementation that uses OpenBao or HashiCorp Vault as the backend PKI system.
 // @description
 // @description **Authentication Methods:**
-// @description - HTTP Basic Auth (mapped to backend userpass or AppRole)
+// @description - HTTP Basic Auth (mapped to backend userpass, LDAP, or AppRole)
 // @description - TLS Client Certificates (mapped to backend cert auth)
 // @description - Bearer Token (backend token authentication)
 
@@ -182,6 +182,8 @@ func main() {
 	authCfg := &auth.Config{
 		UserpassEnabled:   cfg.EST.Authenticators.Userpass.Enabled,
 		UserpassMountPath: cfg.EST.Authenticators.Userpass.MountPath,
+		LDAPEnabled:       cfg.EST.Authenticators.LDAP.Enabled,
+		LDAPMountPath:     cfg.EST.Authenticators.LDAP.MountPath,
 		AppRoleEnabled:    cfg.EST.Authenticators.AppRole.Enabled,
 		AppRoleMountPath:  cfg.EST.Authenticators.AppRole.MountPath,
 		CertEnabled:       cfg.EST.Authenticators.Cert.Enabled,

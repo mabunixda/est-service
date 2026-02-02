@@ -51,6 +51,10 @@ func (m *mockBackendTest) AuthenticateUserpass(ctx context.Context, mount, usern
 	return "", nil
 }
 
+func (m *mockBackendTest) AuthenticateLDAP(ctx context.Context, mount, username, password string) (string, error) {
+	return "", nil
+}
+
 func (m *mockBackendTest) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
 	return "", nil
 }

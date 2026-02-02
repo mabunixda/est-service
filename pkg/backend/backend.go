@@ -36,6 +36,7 @@ type Backend interface {
 
 	// Authentication Operations
 	AuthenticateUserpass(ctx context.Context, mount, username, password string) (string, error)
+	AuthenticateLDAP(ctx context.Context, mount, username, password string) (string, error)
 	AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error)
 	AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error)
 	ValidateToken(ctx context.Context, token string) (bool, error)

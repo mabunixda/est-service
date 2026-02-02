@@ -24,6 +24,10 @@ type Config struct {
 	UserpassEnabled   bool
 	UserpassMountPath string
 
+	// LDAP authentication
+	LDAPEnabled   bool
+	LDAPMountPath string
+
 	// AppRole authentication
 	AppRoleEnabled   bool
 	AppRoleMountPath string
@@ -54,6 +58,9 @@ func NewManager(backend backend.Backend, config *Config, logger *slog.Logger) *M
 
 	if config.UserpassMountPath == "" {
 		config.UserpassMountPath = "userpass"
+	}
+	if config.LDAPMountPath == "" {
+		config.LDAPMountPath = "ldap"
 	}
 	if config.CertMountPath == "" {
 		config.CertMountPath = "cert"
@@ -89,7 +96,7 @@ func (m *Manager) Authenticate(ctx context.Context, r *http.Request) *Result {
 	}
 
 	// Try HTTP Basic Auth
-	if m.config.UserpassEnabled || m.config.AppRoleEnabled {
+	if m.config.UserpassEnabled || m.config.LDAPEnabled || m.config.AppRoleEnabled {
 		if result := m.authenticateBasic(ctx, r); result.Authenticated {
 			return result
 		}
@@ -230,12 +237,14 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 	username, password := parts[0], parts[1]
 
 	var (
-		token           string
-		err             error
-		userpassError   error
-		appRoleError    error
-		triedUserpass   bool
-		triedAppRole    bool
+		token         string
+		err           error
+		userpassError error
+		ldapError     error
+		appRoleError  error
+		triedUserpass bool
+		triedLDAP     bool
+		triedAppRole  bool
 	)
 
 	// Authenticate with backend IMMEDIATELY
@@ -253,6 +262,22 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 			}
 		}
 		userpassError = err
+	}
+
+	// Try LDAP if userpass failed
+	if m.config.LDAPEnabled {
+		triedLDAP = true
+		token, err = m.backend.AuthenticateLDAP(ctx, m.config.LDAPMountPath, username, password)
+		if err == nil {
+			m.logger.Info("LDAP authentication successful")
+			return &Result{
+				Authenticated: true,
+				Token:         token,
+				Method:        "ldap",
+				Identity:      username,
+			}
+		}
+		ldapError = err
 	}
 
 	if m.config.AppRoleEnabled {
@@ -297,6 +322,10 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 		m.logger.Debug("Userpass authentication failed",
 			"error", userpassError)
 	}
+	if triedLDAP && ldapError != nil {
+		m.logger.Debug("LDAP authentication failed",
+			"error", ldapError)
+	}
 	if triedAppRole && appRoleError != nil {
 		m.logger.Debug("AppRole authentication failed",
 			"error", appRoleError)
@@ -318,11 +347,11 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 func (m *Manager) GetWWWAuthenticateHeaders() []string {
 	var headers []string
 
-	if m.config.UserpassEnabled {
+	if m.config.UserpassEnabled || m.config.LDAPEnabled {
 		headers = append(headers, `Basic realm="EST Service"`)
 	}
 
-	if m.config.AppRoleEnabled && !m.config.UserpassEnabled {
+	if m.config.AppRoleEnabled && !m.config.UserpassEnabled && !m.config.LDAPEnabled {
 		headers = append(headers, `Basic realm="EST Service"`)
 	}
 

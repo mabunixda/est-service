@@ -68,6 +68,13 @@ func (m *mockBackendHandlers) AuthenticateUserpass(ctx context.Context, mount, u
 	return "", fmt.Errorf("invalid credentials")
 }
 
+func (m *mockBackendHandlers) AuthenticateLDAP(ctx context.Context, mount, username, password string) (string, error) {
+	if username == "ldapuser" && password == "ldappass" {
+		return "ldap-token", nil
+	}
+	return "", fmt.Errorf("invalid LDAP credentials")
+}
+
 func (m *mockBackendHandlers) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
 	if roleID == "test-role" && secretID == "test-secret" {
 		return "approle-token", nil

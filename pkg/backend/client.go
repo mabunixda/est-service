@@ -66,6 +66,11 @@ func (c *Client) AuthenticateUserpass(ctx context.Context, mount, username, pass
 	return c.backend.AuthenticateUserpass(ctx, mount, username, password)
 }
 
+// AuthenticateLDAP authenticates using the LDAP backend
+func (c *Client) AuthenticateLDAP(ctx context.Context, mount, username, password string) (string, error) {
+	return c.backend.AuthenticateLDAP(ctx, mount, username, password)
+}
+
 // AuthenticateAppRole authenticates using the AppRole backend
 func (c *Client) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
 	return c.backend.AuthenticateAppRole(ctx, mount, roleID, secretID)

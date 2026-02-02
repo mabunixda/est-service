@@ -65,6 +65,9 @@ est:
     userpass:
       enabled: true
       mount_path: "userpass"
+    ldap:
+      enabled: false
+      mount_path: "ldap"
     approle:
       enabled: false
       mount_path: "approle"

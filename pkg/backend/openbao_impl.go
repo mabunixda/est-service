@@ -331,6 +331,30 @@ func (b *openBaoBackend) AuthenticateUserpass(ctx context.Context, mount, userna
 	return secret.Auth.ClientToken, nil
 }
 
+// AuthenticateLDAP authenticates using the LDAP backend
+func (b *openBaoBackend) AuthenticateLDAP(ctx context.Context, mount, username, password string) (string, error) {
+	path := fmt.Sprintf("auth/%s/login/%s", mount, username)
+
+	data := map[string]interface{}{
+		"password": password,
+	}
+
+	secret, err := b.client.Logical().WriteWithContext(ctx, path, data)
+	if err != nil {
+		return "", fmt.Errorf("LDAP authentication failed: %w", err)
+	}
+
+	if secret == nil || secret.Auth == nil {
+		return "", fmt.Errorf("no auth info returned from LDAP")
+	}
+
+	b.logger.Info("LDAP authentication successful on OpenBao",
+		"username", username,
+		"mount", mount)
+
+	return secret.Auth.ClientToken, nil
+}
+
 // AuthenticateAppRole authenticates using the AppRole backend
 func (b *openBaoBackend) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
 	path := fmt.Sprintf("auth/%s/login", mount)
