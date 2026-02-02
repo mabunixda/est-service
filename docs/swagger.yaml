@@ -1,0 +1,168 @@
+basePath: /
+host: localhost:8443
+info:
+  contact:
+    name: EST Service
+    url: https://github.com/mabunixda/est-service
+  description: |-
+    Enrollment over Secure Transport (EST) Service implementing RFC 7030.
+    This service provides a standards-compliant EST implementation that uses OpenBao or HashiCorp Vault as the backend PKI system.
+
+    **Authentication Methods:**
+    - HTTP Basic Auth (mapped to backend userpass)
+    - TLS Client Certificates (mapped to backend cert auth)
+    - Bearer Token (backend token authentication)
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/en-US/MPL/2.0/
+  title: EST Service API
+  version: 1.0.0
+paths:
+  /.well-known/est/cacerts:
+    get:
+      description: Retrieve the current CA certificate(s) used by the EST server.
+        Returns a PKCS#7 certs-only structure containing one or more certificates.
+      produces:
+      - application/pkcs7-mime
+      responses:
+        "200":
+          description: CA certificates in base64-encoded PKCS#7 format
+          schema:
+            type: string
+        "500":
+          description: Failed to retrieve CA certificates
+          schema:
+            type: string
+      summary: Get CA certificates
+      tags:
+      - EST
+  /.well-known/est/simpleenroll:
+    post:
+      consumes:
+      - application/pkcs10
+      description: Submit a Certificate Signing Request (CSR) to receive a signed
+        certificate. Requires authentication via Basic Auth, TLS client certificate,
+        or Bearer token.
+      parameters:
+      - description: Base64-encoded PKCS#10 Certificate Signing Request
+        in: body
+        name: body
+        required: true
+        schema:
+          type: string
+      produces:
+      - application/pkcs7-mime
+      responses:
+        "200":
+          description: Signed certificate in base64-encoded PKCS#7 format
+          schema:
+            type: string
+        "400":
+          description: Invalid CSR or CSR signature
+          schema:
+            type: string
+        "401":
+          description: Authentication required
+          schema:
+            type: string
+        "500":
+          description: Enrollment failed
+          schema:
+            type: string
+      security:
+      - BasicAuth: []
+      - BearerAuth: []
+      summary: Enroll a new certificate
+      tags:
+      - EST
+  /.well-known/est/simplereenroll:
+    post:
+      consumes:
+      - application/pkcs10
+      description: Submit a Certificate Signing Request (CSR) to renew an existing
+        certificate. Requires authentication and optionally validates that the CSR
+        matches the client certificate.
+      parameters:
+      - description: Base64-encoded PKCS#10 Certificate Signing Request
+        in: body
+        name: body
+        required: true
+        schema:
+          type: string
+      produces:
+      - application/pkcs7-mime
+      responses:
+        "200":
+          description: Renewed certificate in base64-encoded PKCS#7 format
+          schema:
+            type: string
+        "400":
+          description: Invalid CSR, CSR signature, or CSR does not match client certificate
+          schema:
+            type: string
+        "401":
+          description: Authentication required
+          schema:
+            type: string
+        "500":
+          description: Reenrollment failed
+          schema:
+            type: string
+      security:
+      - BasicAuth: []
+      - BearerAuth: []
+      summary: Reenroll an existing certificate
+      tags:
+      - EST
+  /health:
+    get:
+      description: Check if the service and backend are healthy and operational
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is healthy
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "503":
+          description: Service or backend unavailable
+          schema:
+            type: string
+      summary: Health check
+      tags:
+      - Health
+  /ready:
+    get:
+      description: Check if the service is ready to accept requests
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Service is ready
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Readiness check
+      tags:
+      - Health
+schemes:
+- https
+- http
+securityDefinitions:
+  BasicAuth:
+    type: basic
+  BearerAuth:
+    in: header
+    name: Authorization
+    type: apiKey
+swagger: "2.0"
+tags:
+- description: EST protocol endpoints (RFC 7030)
+  name: EST
+- description: Health and readiness checks
+  name: Health
+- description: Observability endpoints
+  name: Metrics

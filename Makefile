@@ -31,8 +31,8 @@ build:
 	@mkdir -p bin
 	go build ${LDFLAGS} -o bin/${BINARY_NAME} ./cmd/est-service
 
-swagger:
-	@echo "Generating Swagger documentation..."
+openapi:
+	@echo "Generating Swagger/OpenAPI documentation..."
 	swag init -g cmd/est-service/main.go -o docs --parseDependency --parseInternal
 
 # Unit tests only (fast, no Docker required)
