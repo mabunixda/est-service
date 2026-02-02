@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 // ExtractCSRFromPKCS7 extracts a CSR from a PKCS#7 blob as required by EST.
@@ -39,10 +40,22 @@ func ExtractCSRFromPKCS7(data []byte) (*x509.CertificateRequest, error) {
 // EST requires the CSR to be base64-encoded DER format with application/pkcs10 content type.
 func ReadCSRPayload(r *http.Request) (*x509.CertificateRequest, error) {
 	const maxCSRSize = 10 * 1024 * 1024 // 10 MB limit
+	return ReadCSRPayloadWithLimit(r, maxCSRSize)
+}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxCSRSize))
+// ReadCSRPayloadWithLimit reads the CSR payload with a custom max size.
+func ReadCSRPayloadWithLimit(r *http.Request, maxSize int64) (*x509.CertificateRequest, error) {
+	if maxSize <= 0 {
+		maxSize = 10 * 1024 * 1024 // 10 MB limit
+	}
+
+	limited := io.LimitedReader{R: r.Body, N: maxSize + 1}
+	body, err := io.ReadAll(&limited)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read request body: %w", err)
+	}
+	if int64(len(body)) > maxSize {
+		return nil, fmt.Errorf("request body too large")
 	}
 
 	// RFC 7030: CSR should be base64-encoded
@@ -68,6 +81,56 @@ func ReadCSRPayload(r *http.Request) (*x509.CertificateRequest, error) {
 	}
 
 	return csr, nil
+}
+
+// ValidateCSRSignatureAlgorithm ensures the CSR signature algorithm is allowed.
+// If allowed is empty, all algorithms are permitted.
+func ValidateCSRSignatureAlgorithm(csr *x509.CertificateRequest, allowed []string) error {
+	if len(allowed) == 0 {
+		return nil
+	}
+
+	allowedSet := make(map[x509.SignatureAlgorithm]struct{}, len(allowed))
+	for _, name := range allowed {
+		if alg, ok := parseSignatureAlgorithm(name); ok {
+			allowedSet[alg] = struct{}{}
+		}
+	}
+
+	if len(allowedSet) == 0 {
+		return fmt.Errorf("no valid signature algorithms configured")
+	}
+
+	if _, ok := allowedSet[csr.SignatureAlgorithm]; !ok {
+		return fmt.Errorf("signature algorithm not allowed: %s", csr.SignatureAlgorithm.String())
+	}
+
+	return nil
+}
+
+func parseSignatureAlgorithm(name string) (x509.SignatureAlgorithm, bool) {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "MD5WITHRSA":
+		return x509.MD5WithRSA, true
+	case "SHA1WITHRSA":
+		return x509.SHA1WithRSA, true
+	case "SHA256WITHRSA":
+		return x509.SHA256WithRSA, true
+	case "SHA384WITHRSA":
+		return x509.SHA384WithRSA, true
+	case "SHA512WITHRSA":
+		return x509.SHA512WithRSA, true
+	case "ECDSAWITHSHA1":
+		return x509.ECDSAWithSHA1, true
+	case "ECDSAWITHSHA256":
+		return x509.ECDSAWithSHA256, true
+	case "ECDSAWITHSHA384":
+		return x509.ECDSAWithSHA384, true
+	case "ECDSAWITHSHA512":
+		return x509.ECDSAWithSHA512, true
+	default:
+		return x509.UnknownSignatureAlgorithm, false
+	}
 }
 
 // ValidateCSRSignature checks that the CSR's signature is valid.

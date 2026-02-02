@@ -143,6 +143,10 @@ func (m *mockBackend) Type() backend.BackendType {
 	return backend.BackendTypeOpenBao
 }
 
+func (m *mockBackend) Close() error {
+	return nil
+}
+
 // generateTestCert creates a test certificate for testing
 func generateTestCert(subject pkix.Name) (*x509.Certificate, error) {
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)

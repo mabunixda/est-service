@@ -548,3 +548,16 @@ func (b *openBaoBackend) CloneWithToken(ctx context.Context, token string) (Back
 
 	return clonedBackend, nil
 }
+
+// Close cleans up resources and scrubs tokens from memory
+// This is especially important for cloned clients with per-request tokens
+// to minimize the window of token exposure in memory
+func (b *openBaoBackend) Close() error {
+	if b.client != nil {
+		// Clear the token from memory
+		b.client.SetToken("")
+		// Set client to nil to prevent reuse
+		b.client = nil
+	}
+	return nil
+}

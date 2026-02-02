@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/mabunixda/est-service/pkg/auth"
@@ -21,24 +22,26 @@ import (
 
 // Server represents the EST service HTTP server
 type Server struct {
-	httpServer  *http.Server
-	backend     *backend.Client
-	authMgr     *auth.Manager
-	config      *Config
-	logger      *slog.Logger
-	telemetry   *Telemetry
-	rateLimiter *RateLimiter
+	httpServer      *http.Server
+	backend         *backend.Client
+	authMgr         *auth.Manager
+	config          *Config
+	logger          *slog.Logger
+	telemetry       *Telemetry
+	rateLimiter     *RateLimiter // General rate limiter for all endpoints
+	authRateLimiter *RateLimiter // Stricter rate limiter for auth endpoints
 }
 
 // Config holds server configuration
 type Config struct {
-	ListenAddr   string
-	TLSConfig    *TLSConfig
-	RateLimit    *RateLimitConfig
-	Telemetry    *TelemetryConfig
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	IdleTimeout  time.Duration
+	ListenAddr            string
+	TLSConfig             *TLSConfig
+	RateLimit             *RateLimitConfig
+	Telemetry             *TelemetryConfig
+	InternalEndpointsAuth bool
+	ReadTimeout           time.Duration
+	WriteTimeout          time.Duration
+	IdleTimeout           time.Duration
 
 	// EST configuration
 	PKIMount         string
@@ -56,9 +59,28 @@ type TLSConfig struct {
 
 // RateLimitConfig holds rate limiting configuration
 type RateLimitConfig struct {
-	Enabled           bool
-	RequestsPerSecond int
-	Burst             int
+	Enabled               bool
+	RequestsPerSecond     int
+	Burst                 int
+	TrustedProxyCIDRs     []string
+	AuthRequestsPerSecond int // Stricter limit for auth endpoints (0 = use general limit)
+	AuthBurst             int // Stricter burst for auth endpoints (0 = use general burst)
+}
+
+// HealthResponse represents the health check response
+type HealthResponse struct {
+	Status    string       `json:"status"`
+	Backend   string       `json:"backend"`
+	Timestamp string       `json:"timestamp"`
+	TLSCert   *TLSCertInfo `json:"tls_certificate,omitempty"`
+}
+
+// TLSCertInfo contains TLS certificate expiry information
+type TLSCertInfo struct {
+	ExpiresAt     string `json:"expires_at"`
+	DaysRemaining int    `json:"days_remaining"`
+	Subject       string `json:"subject"`
+	Status        string `json:"status"` // "ok", "warning", "critical", "expired"
 }
 
 // New creates a new EST server
@@ -95,29 +117,50 @@ func New(backend *backend.Client, cfg *Config, logger *slog.Logger) (*Server, er
 	var rateLimiter *RateLimiter
 	if cfg.RateLimit != nil && cfg.RateLimit.Enabled {
 		rateLimiter = NewRateLimiterWithTelemetry(cfg.RateLimit.RequestsPerSecond, cfg.RateLimit.Burst, telemetry)
+		if err := rateLimiter.SetTrustedProxyCIDRs(cfg.RateLimit.TrustedProxyCIDRs); err != nil {
+			return nil, fmt.Errorf("failed to configure trusted proxies: %w", err)
+		}
 		logger.Info("Rate limiting enabled",
 			"requests_per_second", cfg.RateLimit.RequestsPerSecond,
 			"burst", cfg.RateLimit.Burst)
 	}
 
+	// Create separate auth rate limiter if configured
+	var authRateLimiter *RateLimiter
+	if cfg.RateLimit != nil && cfg.RateLimit.Enabled && cfg.RateLimit.AuthRequestsPerSecond > 0 {
+		authRateLimiter = NewRateLimiterWithTelemetry(cfg.RateLimit.AuthRequestsPerSecond, cfg.RateLimit.AuthBurst, telemetry)
+		if err := authRateLimiter.SetTrustedProxyCIDRs(cfg.RateLimit.TrustedProxyCIDRs); err != nil {
+			return nil, fmt.Errorf("failed to configure trusted proxies for auth rate limiter: %w", err)
+		}
+		logger.Info("Auth endpoint rate limiting enabled",
+			"auth_requests_per_second", cfg.RateLimit.AuthRequestsPerSecond,
+			"auth_burst", cfg.RateLimit.AuthBurst)
+	}
+
 	// Create server
 	s := &Server{
-		backend:     backend,
-		authMgr:     authMgr,
-		config:      cfg,
-		logger:      logger,
-		telemetry:   telemetry,
-		rateLimiter: rateLimiter,
+		backend:         backend,
+		authMgr:         authMgr,
+		config:          cfg,
+		logger:          logger,
+		telemetry:       telemetry,
+		rateLimiter:     rateLimiter,
+		authRateLimiter: authRateLimiter,
 	}
 
 	// Setup routes
 	mux := s.setupRoutes()
 
-	// Wrap mux with rate limiting if enabled
+	// Apply middleware chain (innermost first, outermost last)
 	var handler http.Handler = mux
+
+	// 1. Rate limiting (innermost - applied first)
 	if s.rateLimiter != nil {
 		handler = s.rateLimiter.Middleware(handler)
 	}
+
+	// 2. Security headers (outermost - applied last, so headers are set first)
+	handler = s.securityHeadersMiddleware(handler)
 
 	// Create HTTP server
 	httpServer := &http.Server{
@@ -141,6 +184,15 @@ func New(backend *backend.Client, cfg *Config, logger *slog.Logger) (*Server, er
 
 	s.httpServer = httpServer
 
+	// Check certificate expiry at startup (after httpServer is assigned)
+	if cfg.TLSConfig != nil && cfg.TLSConfig.CertFile != "" && cfg.TLSConfig.KeyFile != "" {
+		if err := s.checkCertificateExpiry(context.Background()); err != nil {
+			// Log error but don't fail startup - the cert might be expired but we still need to start
+			// This allows for cert renewal operations while the service is running
+			s.logger.Error("Certificate expiry check failed", "error", err)
+		}
+	}
+
 	return s, nil
 }
 
@@ -160,21 +212,36 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	simpleEnrollHandler := handlers.NewSimpleEnrollHandler(s.backend, s.authMgr, s.config.EnrollmentConfig, s.logger, telemetry)
 	simpleReenrollHandler := handlers.NewSimpleReenrollHandler(s.backend, s.authMgr, s.config.EnrollmentConfig, s.logger, telemetry)
 
+	// Apply auth rate limiting to enrollment endpoints if configured
+	var enrollHandler, reenrollHandler http.Handler = simpleEnrollHandler, simpleReenrollHandler
+	if s.authRateLimiter != nil {
+		enrollHandler = s.authRateLimiter.Middleware(enrollHandler)
+		reenrollHandler = s.authRateLimiter.Middleware(reenrollHandler)
+	}
+
 	// EST endpoints per RFC 7030
 	mux.Handle("/.well-known/est/cacerts", s.loggingMiddleware(s.recoveryMiddleware(caCertsHandler)))
-	mux.Handle("/.well-known/est/simpleenroll", s.loggingMiddleware(s.recoveryMiddleware(simpleEnrollHandler)))
-	mux.Handle("/.well-known/est/simplereenroll", s.loggingMiddleware(s.recoveryMiddleware(simpleReenrollHandler)))
+	mux.Handle("/.well-known/est/simpleenroll", s.loggingMiddleware(s.recoveryMiddleware(enrollHandler)))
+	mux.Handle("/.well-known/est/simplereenroll", s.loggingMiddleware(s.recoveryMiddleware(reenrollHandler)))
 
 	// Health check
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/ready", s.readyHandler)
 
 	// Swagger documentation
-	mux.Handle("/swagger/", httpSwagger.WrapHandler)
+	if s.config.InternalEndpointsAuth {
+		mux.Handle("/swagger/", s.loggingMiddleware(s.recoveryMiddleware(s.authMiddleware(httpSwagger.WrapHandler))))
+	} else {
+		mux.Handle("/swagger/", httpSwagger.WrapHandler)
+	}
 
 	// Prometheus metrics endpoint (if telemetry is enabled)
 	if s.telemetry != nil {
-		mux.Handle("/metrics", promhttp.Handler())
+		if s.config.InternalEndpointsAuth {
+			mux.Handle("/metrics", s.loggingMiddleware(s.recoveryMiddleware(s.authMiddleware(promhttp.Handler()))))
+		} else {
+			mux.Handle("/metrics", promhttp.Handler())
+		}
 	}
 
 	return mux
@@ -250,6 +317,62 @@ func (s *Server) setupTLS(cfg *TLSConfig) (*tls.Config, error) {
 	return tlsConfig, nil
 }
 
+// checkCertificateExpiry checks the server TLS certificate expiry and logs warnings
+// It also records the expiry metric if telemetry is enabled
+func (s *Server) checkCertificateExpiry(ctx context.Context) error {
+	// Only check if TLS is configured
+	if s.httpServer.TLSConfig == nil || len(s.httpServer.TLSConfig.Certificates) == 0 {
+		return nil
+	}
+
+	cert := s.httpServer.TLSConfig.Certificates[0]
+
+	// Parse certificate if Leaf is not already populated
+	if cert.Leaf == nil {
+		parsed, err := x509.ParseCertificate(cert.Certificate[0])
+		if err != nil {
+			s.logger.Warn("Failed to parse server certificate for expiry check", "error", err)
+			return fmt.Errorf("failed to parse server certificate: %w", err)
+		}
+		cert.Leaf = parsed
+	}
+
+	// Calculate days until expiry
+	expiresAt := cert.Leaf.NotAfter
+	daysUntilExpiry := time.Until(expiresAt).Hours() / 24
+
+	// Log certificate expiry information
+	s.logger.Info("Server certificate expiry check",
+		"expires_at", expiresAt.Format(time.RFC3339),
+		"days_remaining", int(daysUntilExpiry),
+		"subject", cert.Leaf.Subject.CommonName)
+
+	// Log warnings based on days remaining
+	if daysUntilExpiry < 0 {
+		s.logger.Error("🚨 Server certificate has EXPIRED!",
+			"expired_at", expiresAt.Format(time.RFC3339),
+			"days_overdue", int(-daysUntilExpiry))
+		return fmt.Errorf("server certificate expired %d days ago", int(-daysUntilExpiry))
+	} else if daysUntilExpiry < 7 {
+		s.logger.Error("🚨 Server certificate expires VERY soon!",
+			"expires_at", expiresAt.Format(time.RFC3339),
+			"days_remaining", int(daysUntilExpiry),
+			"action_required", "Renew certificate immediately")
+	} else if daysUntilExpiry < 30 {
+		s.logger.Warn("⚠️  Server certificate expires soon!",
+			"expires_at", expiresAt.Format(time.RFC3339),
+			"days_remaining", int(daysUntilExpiry),
+			"action_required", "Plan certificate renewal")
+	}
+
+	// Record metric if telemetry is enabled
+	if s.telemetry != nil {
+		s.telemetry.RecordCertificateExpiry(ctx, daysUntilExpiry)
+	}
+
+	return nil
+}
+
 // Start starts the EST server
 func (s *Server) Start(ctx context.Context) error {
 	s.logger.Info("Starting EST server", "address", s.config.ListenAddr)
@@ -304,12 +427,49 @@ func (s *Server) Start(ctx context.Context) error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.logger.Info("Server shutdown initiated")
 
-	// Shutdown rate limiter cleanup goroutine
+	// Shutdown rate limiter cleanup goroutines
 	if s.rateLimiter != nil {
 		s.rateLimiter.Shutdown()
 	}
+	if s.authRateLimiter != nil {
+		s.authRateLimiter.Shutdown()
+	}
 
 	return s.httpServer.Shutdown(ctx)
+}
+
+// securityHeadersMiddleware adds security headers to all responses
+func (s *Server) securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Prevent MIME sniffing
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+
+		// Prevent clickjacking
+		w.Header().Set("X-Frame-Options", "DENY")
+
+		// HSTS - only set when using HTTPS
+		if r.TLS != nil {
+			// Enable HSTS with 1 year max-age and include subdomains
+			w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+
+		// Content Security Policy - very restrictive for API service
+		// default-src 'none' means no resources allowed by default
+		// frame-ancestors 'none' prevents embedding in frames (redundant with X-Frame-Options but more modern)
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+
+		// Disable caching for sensitive EST endpoints
+		if strings.HasPrefix(r.URL.Path, "/.well-known/est/") {
+			w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, private")
+			w.Header().Set("Pragma", "no-cache")
+			w.Header().Set("Expires", "0")
+		}
+
+		// Remove server version information
+		w.Header().Set("Server", "EST-Service")
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // loggingMiddleware logs HTTP requests
@@ -363,12 +523,28 @@ func (s *Server) recoveryMiddleware(next http.Handler) http.Handler {
 	})
 }
 
+// authMiddleware enforces authentication using the configured auth manager
+func (s *Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		result := s.authMgr.Authenticate(r.Context(), r)
+		if !result.Authenticated {
+			headers := s.authMgr.GetWWWAuthenticateHeaders()
+			for _, header := range headers {
+				w.Header().Add("WWW-Authenticate", header)
+			}
+			http.Error(w, "Authentication required", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // healthHandler handles health check requests
 // @Summary Health check
 // @Description Check if the service and backend are healthy and operational
 // @Tags Health
 // @Produce json
-// @Success 200 {object} map[string]string "Service is healthy"
+// @Success 200 {object} HealthResponse "Service is healthy"
 // @Failure 503 {string} string "Service or backend unavailable"
 // @Router /health [get]
 func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
@@ -394,10 +570,58 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Build health response
+	response := HealthResponse{
+		Status:    "ok",
+		Backend:   "healthy",
+		Timestamp: time.Now().Format(time.RFC3339),
+	}
+
+	// Add certificate info if TLS is configured
+	if s.httpServer.TLSConfig != nil && len(s.httpServer.TLSConfig.Certificates) > 0 {
+		cert := s.httpServer.TLSConfig.Certificates[0]
+		if cert.Leaf != nil {
+			daysRemaining := int(time.Until(cert.Leaf.NotAfter).Hours() / 24)
+			certStatus := "ok"
+
+			if daysRemaining < 0 {
+				certStatus = "expired"
+			} else if daysRemaining < 7 {
+				certStatus = "critical"
+			} else if daysRemaining < 30 {
+				certStatus = "warning"
+			}
+
+			response.TLSCert = &TLSCertInfo{
+				ExpiresAt:     cert.Leaf.NotAfter.Format(time.RFC3339),
+				DaysRemaining: daysRemaining,
+				Subject:       cert.Leaf.Subject.CommonName,
+				Status:        certStatus,
+			}
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if _, err := fmt.Fprintf(w, `{"status":"ok","backend":"healthy"}`); err != nil {
+
+	// Use json.NewEncoder for proper JSON encoding
+	if _, err := fmt.Fprintf(w, `{"status":"%s","backend":"%s","timestamp":"%s"`,
+		response.Status, response.Backend, response.Timestamp); err != nil {
 		s.logger.Error("Failed to write health response", "error", err)
+		return
+	}
+
+	if response.TLSCert != nil {
+		if _, err := fmt.Fprintf(w, `,"tls_certificate":{"expires_at":"%s","days_remaining":%d,"subject":"%s","status":"%s"}`,
+			response.TLSCert.ExpiresAt, response.TLSCert.DaysRemaining,
+			response.TLSCert.Subject, response.TLSCert.Status); err != nil {
+			s.logger.Error("Failed to write health response cert info", "error", err)
+			return
+		}
+	}
+
+	if _, err := fmt.Fprintf(w, `}`); err != nil {
+		s.logger.Error("Failed to close health response", "error", err)
 	}
 }
 

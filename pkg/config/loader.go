@@ -60,6 +60,10 @@ func applyDefaults(cfg *Config) error {
 	if cfg.Server.IdleTimeout == 0 {
 		cfg.Server.IdleTimeout = 60 * time.Second
 	}
+	if cfg.Server.InternalEndpointsAuth == nil {
+		defaultAuth := !cfg.DeveloperMode
+		cfg.Server.InternalEndpointsAuth = &defaultAuth
+	}
 
 	// Rate limiting defaults
 	if cfg.Server.RateLimit.RequestsPerSecond == 0 {
@@ -67,6 +71,19 @@ func applyDefaults(cfg *Config) error {
 	}
 	if cfg.Server.RateLimit.Burst == 0 {
 		cfg.Server.RateLimit.Burst = 200
+	}
+
+	// Auth-specific rate limiting defaults (stricter to prevent brute force)
+	// Only apply if auth rate limiting is explicitly configured or rate limiting is enabled
+	if cfg.Server.RateLimit.Enabled {
+		if cfg.Server.RateLimit.AuthRequestsPerSecond == 0 {
+			// Default: 10 auth requests per second (stricter than general limit)
+			cfg.Server.RateLimit.AuthRequestsPerSecond = 10
+		}
+		if cfg.Server.RateLimit.AuthBurst == 0 {
+			// Default: burst of 5 (stricter than general burst)
+			cfg.Server.RateLimit.AuthBurst = 5
+		}
 	}
 
 	// Backend configuration - environment variables always override config values (12-factor app)
@@ -151,6 +168,21 @@ func validate(cfg *Config) error {
 		if policy.Type == "role" && policy.Value == "" {
 			return fmt.Errorf("label %s: value is required when type is 'role'", label)
 		}
+	}
+
+	// Validate CSR size limits - enforce absolute min/max for security
+	const (
+		absoluteMinCSRSize = 1024             // 1 KB minimum (realistic for smallest CSR)
+		absoluteMaxCSRSize = 10 * 1024 * 1024 // 10 MB maximum (prevent DoS)
+	)
+
+	if cfg.EST.CSRValidation.MaxSizeBytes > absoluteMaxCSRSize {
+		return fmt.Errorf("csr_validation.max_size_bytes cannot exceed %d bytes (10MB), got %d",
+			absoluteMaxCSRSize, cfg.EST.CSRValidation.MaxSizeBytes)
+	}
+	if cfg.EST.CSRValidation.MaxSizeBytes < absoluteMinCSRSize {
+		return fmt.Errorf("csr_validation.max_size_bytes must be at least %d bytes (1KB), got %d",
+			absoluteMinCSRSize, cfg.EST.CSRValidation.MaxSizeBytes)
 	}
 
 	return nil

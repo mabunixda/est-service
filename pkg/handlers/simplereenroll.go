@@ -85,22 +85,28 @@ func (h *SimpleReenrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	if hasTLSCert {
 		h.logger.Info("Reenrollment request authenticated with TLS certificate",
-			"method", authResult.Method,
-			"identity", authResult.Identity,
-			"cert_subject", clientCert.Subject.String())
+			"method", authResult.Method)
 	} else {
 		h.logger.Info("Reenrollment request authenticated without TLS certificate",
-			"method", authResult.Method,
-			"identity", authResult.Identity)
+			"method", authResult.Method)
 	}
 
-	csr, err := est.ReadCSRPayload(r)
+	csr, err := est.ReadCSRPayloadWithLimit(r, h.config.MaxCSRSize)
 	if err != nil {
 		h.logger.Error("Failed to parse CSR", "error", err)
 		if h.telemetry != nil {
 			h.telemetry.RecordCertificateRejected(ctx, "reenroll", "invalid_csr")
 		}
 		http.Error(w, "Invalid CSR", http.StatusBadRequest)
+		return
+	}
+
+	if err := est.ValidateCSRSignatureAlgorithm(csr, h.config.AllowedSignatureAlgos); err != nil {
+		h.logger.Error("Disallowed CSR signature algorithm", "error", err)
+		if h.telemetry != nil {
+			h.telemetry.RecordCertificateRejected(ctx, "reenroll", "invalid_signature_algorithm")
+		}
+		http.Error(w, "Invalid CSR signature algorithm", http.StatusBadRequest)
 		return
 	}
 
@@ -166,13 +172,7 @@ func (h *SimpleReenrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	// Log successful reenrollment with optional old serial
 	logAttrs := []any{
-		"subject", cert.Subject.String(),
-		"serial", cert.SerialNumber.String(),
-		"identity", authResult.Identity,
 		"ttl", enrollReq.Policy.TTL,
-	}
-	if clientCert != nil {
-		logAttrs = append(logAttrs, "old_serial", clientCert.SerialNumber.String())
 	}
 	h.logger.Info("Certificate reenrolled successfully", logAttrs...)
 }

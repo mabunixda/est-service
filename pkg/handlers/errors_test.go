@@ -257,8 +257,8 @@ func TestSendBackendError_Forbidden(t *testing.T) {
 	if !strings.Contains(body, "insufficient permissions") {
 		t.Errorf("Expected body to contain 'insufficient permissions', got: %s", body)
 	}
-	if !strings.Contains(body, "Details:") {
-		t.Errorf("Expected body to contain 'Details:', got: %s", body)
+	if strings.Contains(body, "Details:") {
+		t.Errorf("Expected body to omit details, got: %s", body)
 	}
 }
 
@@ -311,8 +311,8 @@ func TestSendBackendError_OtherErrors(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "Details:") {
-		t.Errorf("Expected body to contain 'Details:', got: %s", body)
+	if strings.Contains(body, "Details:") {
+		t.Errorf("Expected body to omit details, got: %s", body)
 	}
 }
 

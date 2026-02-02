@@ -26,6 +26,7 @@ type EnrollmentConfig struct {
 	Labels                map[string]LabelPolicy
 	DefaultPolicy         LabelPolicy
 	MaxCSRSize            int64
+	AllowedSignatureAlgos []string
 	UseAuthenticatedToken bool // If true, use authenticated user's token for PKI operations
 }
 
@@ -54,6 +55,14 @@ func processCSRSigning(ctx context.Context, backendClient backend.Backend, req *
 	if err != nil {
 		return nil, fmt.Errorf("failed to create authenticated backend client: %w", err)
 	}
+	// SECURITY: Always cleanup the cloned client to scrub the token from memory
+	// This minimizes the window of token exposure, especially for per-request tokens
+	defer func() {
+		if closeErr := authenticatedClient.Close(); closeErr != nil {
+			// Log error but don't fail the request - cleanup is best-effort
+			// The original error (if any) takes precedence
+		}
+	}()
 
 	var cert *x509.Certificate
 

@@ -38,6 +38,9 @@ type Telemetry struct {
 	// Certificate Metrics
 	certIssuedCounter   metric.Int64Counter
 	certRejectedCounter metric.Int64Counter
+
+	// Server Certificate Monitoring
+	certExpiryGauge metric.Float64Gauge
 }
 
 // TelemetryConfig configures OpenTelemetry
@@ -46,6 +49,7 @@ type TelemetryConfig struct {
 	ServiceVersion string
 	PrometheusPort int    // Port for Prometheus scraping (0 to disable)
 	OTLPEndpoint   string // OTLP endpoint for metrics export (empty to disable)
+	OTLPInsecure   bool   // Allow insecure OTLP (HTTP)
 }
 
 // NewTelemetry initializes OpenTelemetry with both Prometheus and OTLP exporters
@@ -81,10 +85,13 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 
 	// OTLP exporter (push-based)
 	if cfg.OTLPEndpoint != "" {
-		otlpExporter, err := otlpmetrichttp.New(ctx,
+		opts := []otlpmetrichttp.Option{
 			otlpmetrichttp.WithEndpoint(cfg.OTLPEndpoint),
-			otlpmetrichttp.WithInsecure(), // Use WithTLSClientConfig for production
-		)
+		}
+		if cfg.OTLPInsecure {
+			opts = append(opts, otlpmetrichttp.WithInsecure())
+		}
+		otlpExporter, err := otlpmetrichttp.New(ctx, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OTLP exporter: %w", err)
 		}
@@ -230,6 +237,15 @@ func NewTelemetry(ctx context.Context, cfg *TelemetryConfig, logger *slog.Logger
 		return nil, err
 	}
 
+	// Server certificate expiry gauge
+	if t.certExpiryGauge, err = meter.Float64Gauge(
+		"est.server.cert.expiry_days",
+		metric.WithDescription("Days until server TLS certificate expires"),
+		metric.WithUnit("d"),
+	); err != nil {
+		return nil, err
+	}
+
 	logger.Info("OpenTelemetry initialized")
 	return t, nil
 }
@@ -272,17 +288,13 @@ func (t *Telemetry) DecrementActiveConnections(ctx context.Context) {
 
 // RecordRateLimitReject records a rate-limited request
 func (t *Telemetry) RecordRateLimitReject(ctx context.Context, ip string) {
-	attrs := []attribute.KeyValue{
-		attribute.String("client.ip", ip),
-	}
-	t.rateLimitCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+	t.rateLimitCounter.Add(ctx, 1)
 }
 
 // RecordAuthSuccess records a successful authentication
 func (t *Telemetry) RecordAuthSuccess(ctx context.Context, method, identity string) {
 	attrs := []attribute.KeyValue{
 		attribute.String("auth.method", method),
-		attribute.String("auth.identity", identity),
 	}
 	t.authSuccessCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
@@ -291,7 +303,6 @@ func (t *Telemetry) RecordAuthSuccess(ctx context.Context, method, identity stri
 func (t *Telemetry) RecordAuthFailure(ctx context.Context, method, reason string) {
 	attrs := []attribute.KeyValue{
 		attribute.String("auth.method", method),
-		attribute.String("auth.failure_reason", reason),
 	}
 	t.authFailureCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
 }
@@ -300,8 +311,6 @@ func (t *Telemetry) RecordAuthFailure(ctx context.Context, method, reason string
 func (t *Telemetry) RecordCertificateIssued(ctx context.Context, operation, subject, serialNumber string, ttl string) {
 	attrs := []attribute.KeyValue{
 		attribute.String("cert.operation", operation), // "enroll" or "reenroll"
-		attribute.String("cert.subject", subject),
-		attribute.String("cert.serial_number", serialNumber),
 		attribute.String("cert.ttl", ttl),
 	}
 	t.certIssuedCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
@@ -311,7 +320,11 @@ func (t *Telemetry) RecordCertificateIssued(ctx context.Context, operation, subj
 func (t *Telemetry) RecordCertificateRejected(ctx context.Context, operation, reason string) {
 	attrs := []attribute.KeyValue{
 		attribute.String("cert.operation", operation),
-		attribute.String("cert.rejection_reason", reason),
 	}
 	t.certRejectedCounter.Add(ctx, 1, metric.WithAttributes(attrs...))
+}
+
+// RecordCertificateExpiry records the days until server TLS certificate expires
+func (t *Telemetry) RecordCertificateExpiry(ctx context.Context, daysRemaining float64) {
+	t.certExpiryGauge.Record(ctx, daysRemaining)
 }

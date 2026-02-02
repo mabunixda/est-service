@@ -508,10 +508,17 @@ func TestRateLimiter_VisitorTracking(t *testing.T) {
 }
 
 func TestGetClientIP_XForwardedFor(t *testing.T) {
+	rl := NewRateLimiter(10, 20)
+	defer rl.Shutdown()
+	if err := rl.SetTrustedProxyCIDRs([]string{"10.0.0.0/8"}); err != nil {
+		t.Fatalf("failed to set trusted proxies: %v", err)
+	}
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-Forwarded-For", "203.0.113.1, 198.51.100.1")
+	req.RemoteAddr = "10.0.0.1:12345"
 
-	ip := getClientIP(req)
+	ip := rl.getClientIP(req)
 
 	if ip != "203.0.113.1" {
 		t.Errorf("Expected IP 203.0.113.1, got %s", ip)
@@ -519,10 +526,17 @@ func TestGetClientIP_XForwardedFor(t *testing.T) {
 }
 
 func TestGetClientIP_XForwardedForSingle(t *testing.T) {
+	rl := NewRateLimiter(10, 20)
+	defer rl.Shutdown()
+	if err := rl.SetTrustedProxyCIDRs([]string{"10.0.0.0/8"}); err != nil {
+		t.Fatalf("failed to set trusted proxies: %v", err)
+	}
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-Forwarded-For", "203.0.113.50")
+	req.RemoteAddr = "10.0.0.1:12345"
 
-	ip := getClientIP(req)
+	ip := rl.getClientIP(req)
 
 	if ip != "203.0.113.50" {
 		t.Errorf("Expected IP 203.0.113.50, got %s", ip)
@@ -530,10 +544,13 @@ func TestGetClientIP_XForwardedForSingle(t *testing.T) {
 }
 
 func TestGetClientIP_RemoteAddr(t *testing.T) {
+	rl := NewRateLimiter(10, 20)
+	defer rl.Shutdown()
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.RemoteAddr = "192.168.1.100:12345"
 
-	ip := getClientIP(req)
+	ip := rl.getClientIP(req)
 
 	if ip != "192.168.1.100" {
 		t.Errorf("Expected IP 192.168.1.100, got %s", ip)
@@ -541,10 +558,13 @@ func TestGetClientIP_RemoteAddr(t *testing.T) {
 }
 
 func TestGetClientIP_RemoteAddrNoPort(t *testing.T) {
+	rl := NewRateLimiter(10, 20)
+	defer rl.Shutdown()
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.RemoteAddr = "192.168.1.100"
 
-	ip := getClientIP(req)
+	ip := rl.getClientIP(req)
 
 	if ip != "192.168.1.100" {
 		t.Errorf("Expected IP 192.168.1.100, got %s", ip)

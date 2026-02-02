@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	_ "github.com/mabunixda/est-service/docs" // Swagger docs
@@ -78,14 +79,63 @@ func main() {
 	})
 	logger.Info("Starting EST Service", "version", version.Version)
 
-	// Warn if in developer mode
+	// Warn if in developer mode with enhanced safeguards
 	if cfg.DeveloperMode {
-		logger.Warn("⚠️  DEVELOPER MODE ENABLED - TLS enforcement disabled")
+		// Check for production environment indicators
+		productionIndicators := map[string]string{
+			"ENVIRONMENT":    os.Getenv("ENVIRONMENT"),
+			"ENV":            os.Getenv("ENV"),
+			"DEPLOYMENT_ENV": os.Getenv("DEPLOYMENT_ENV"),
+			"GO_ENV":         os.Getenv("GO_ENV"),
+		}
+
+		for envVar, value := range productionIndicators {
+			if value != "" {
+				valueLower := strings.ToLower(value)
+				if valueLower == "production" || valueLower == "prod" {
+					logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+					logger.Error("❌ FATAL SECURITY ERROR: developer_mode enabled in production")
+					logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+					logger.Error("❌ Environment variable indicates production deployment", "var", envVar, "value", value)
+					logger.Error("❌ developer_mode MUST be disabled in production environments")
+					logger.Error("❌ This configuration bypasses critical security controls")
+					logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+					os.Exit(1)
+				}
+			}
+		}
+
+		// Require explicit confirmation to use developer mode
+		confirmationValue := os.Getenv("ALLOW_INSECURE_DEV_MODE")
+		if confirmationValue != "yes-i-understand-the-risks" {
+			logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+			logger.Error("❌ developer_mode requires explicit confirmation")
+			logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+			logger.Error("❌ To use developer_mode, you must set:")
+			logger.Error("❌   export ALLOW_INSECURE_DEV_MODE=yes-i-understand-the-risks")
+			logger.Error("❌")
+			logger.Error("❌ developer_mode disables critical security features:")
+			logger.Error("❌   - TLS/HTTPS enforcement is DISABLED")
+			logger.Error("❌   - All traffic may be UNENCRYPTED")
+			logger.Error("❌   - Authentication may be weakened")
+			logger.Error("❌   - This mode is for LOCAL DEVELOPMENT ONLY")
+			logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+			os.Exit(1)
+		}
+
+		// Print prominent warnings
+		logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		logger.Error("⚠️  ⚠️  ⚠️  ⚠️  ⚠️  DEVELOPER MODE ENABLED  ⚠️  ⚠️  ⚠️  ⚠️  ⚠️")
+		logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+		logger.Warn("⚠️  TLS enforcement is DISABLED")
+		if cfg.Server.TLS.CertFile == "" || cfg.Server.TLS.KeyFile == "" {
+			logger.Warn("⚠️  Running without TLS certificates - ALL TRAFFIC IS UNENCRYPTED")
+		}
+		logger.Warn("⚠️  Security controls may be relaxed")
 		logger.Warn("⚠️  This mode is ONLY for local development and testing")
 		logger.Warn("⚠️  NEVER use developer_mode in production environments")
-		if cfg.Server.TLS.CertFile == "" || cfg.Server.TLS.KeyFile == "" {
-			logger.Warn("⚠️  Running without TLS - all traffic is unencrypted")
-		}
+		logger.Warn("⚠️  NEVER expose this service to the internet in developer_mode")
+		logger.Error("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	}
 
 	// Create backend client (OpenBao/Vault)
@@ -134,8 +184,9 @@ func main() {
 			Value: cfg.EST.DefaultPolicy.Value,
 			TTL:   cfg.EST.DefaultPolicy.TTL, // Certificate TTL
 		},
-		Labels:     make(map[string]handlers.LabelPolicy),
-		MaxCSRSize: int64(cfg.EST.CSRValidation.MaxSizeBytes),
+		Labels:                make(map[string]handlers.LabelPolicy),
+		MaxCSRSize:            int64(cfg.EST.CSRValidation.MaxSizeBytes),
+		AllowedSignatureAlgos: cfg.EST.CSRValidation.AllowedSignatureAlgorithms,
 	}
 
 	// Convert label configs
@@ -156,6 +207,12 @@ func main() {
 		PKIMount:         cfg.EST.DefaultMount,
 		AuthConfig:       authCfg,
 		EnrollmentConfig: enrollmentCfg,
+		InternalEndpointsAuth: func() bool {
+			if cfg.Server.InternalEndpointsAuth == nil {
+				return !cfg.DeveloperMode
+			}
+			return *cfg.Server.InternalEndpointsAuth
+		}(),
 	}
 
 	// Configure telemetry (OpenTelemetry)
@@ -165,15 +222,19 @@ func main() {
 			ServiceVersion: version.Version,
 			PrometheusPort: cfg.Observability.Metrics.PrometheusPort,
 			OTLPEndpoint:   cfg.Observability.Metrics.OTLPEndpoint,
+			OTLPInsecure:   cfg.Observability.Metrics.OTLPInsecure,
 		}
 	}
 
 	// Configure rate limiting
 	if cfg.Server.RateLimit.Enabled {
 		srvCfg.RateLimit = &server.RateLimitConfig{
-			Enabled:           cfg.Server.RateLimit.Enabled,
-			RequestsPerSecond: cfg.Server.RateLimit.RequestsPerSecond,
-			Burst:             cfg.Server.RateLimit.Burst,
+			Enabled:               cfg.Server.RateLimit.Enabled,
+			RequestsPerSecond:     cfg.Server.RateLimit.RequestsPerSecond,
+			Burst:                 cfg.Server.RateLimit.Burst,
+			TrustedProxyCIDRs:     cfg.Server.RateLimit.TrustedProxyCIDRs,
+			AuthRequestsPerSecond: cfg.Server.RateLimit.AuthRequestsPerSecond,
+			AuthBurst:             cfg.Server.RateLimit.AuthBurst,
 		}
 	}
 	// Configure TLS if cert/key files are provided

@@ -9,8 +9,11 @@ server:
   read_timeout: 15s
   write_timeout: 15s
   idle_timeout: 60s
+  # Allow unauthenticated access to /metrics and /swagger in dev
+  internal_endpoints_auth: false
   rate_limit:
     enabled: false # Disabled for development
+    trusted_proxy_cidrs: []
   tls:
     # No cert/key files - HTTP mode (allowed only in developer_mode)
 
@@ -49,6 +52,7 @@ observability:
   metrics:
     enabled: true
     prometheus_port: 9090
+    otlp_insecure: true
   logging:
     level: "debug"
     format: "text"

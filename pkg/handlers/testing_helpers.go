@@ -104,6 +104,10 @@ func (m *mockBackendHandlers) Type() backend.BackendType {
 	return backend.BackendTypeOpenBao
 }
 
+func (m *mockBackendHandlers) Close() error {
+	return nil
+}
+
 // Helper functions for generating test certificates
 func generateTestCACert() (*x509.Certificate, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)

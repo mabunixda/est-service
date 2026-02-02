@@ -36,6 +36,9 @@ type MockBackend struct {
 	// Clone
 	CloneWithTokenFunc func(ctx context.Context, token string) (Backend, error)
 
+	// Close
+	CloseFunc func() error
+
 	// Metadata
 	TypeFunc func() BackendType
 }
@@ -164,6 +167,7 @@ func (m *MockBackend) CloneWithToken(ctx context.Context, token string) (Backend
 		StartTokenRenewalFunc:    m.StartTokenRenewalFunc,
 		GetAPIClientFunc:         m.GetAPIClientFunc,
 		CloneWithTokenFunc:       m.CloneWithTokenFunc,
+		CloseFunc:                m.CloseFunc,
 		TypeFunc:                 m.TypeFunc,
 	}, nil
 }
@@ -174,4 +178,12 @@ func (m *MockBackend) Type() BackendType {
 		return m.TypeFunc()
 	}
 	return BackendTypeVault
+}
+
+// Close implements Backend.Close
+func (m *MockBackend) Close() error {
+	if m.CloseFunc != nil {
+		return m.CloseFunc()
+	}
+	return nil
 }

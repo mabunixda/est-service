@@ -116,3 +116,8 @@ func (c *Client) CloneWithToken(ctx context.Context, token string) (Backend, err
 	}
 	return &Client{backend: clonedBackend}, nil
 }
+
+// Close cleans up resources and scrubs tokens from memory
+func (c *Client) Close() error {
+	return c.backend.Close()
+}

@@ -84,6 +84,10 @@ func (m *mockBackendTest) Type() BackendType {
 	return BackendTypeOpenBao
 }
 
+func (m *mockBackendTest) Close() error {
+	return nil
+}
+
 func TestClientWrapperDelegation(t *testing.T) {
 	mock := &mockBackendTest{}
 	client := &Client{backend: mock}
@@ -248,6 +252,10 @@ type mockBackendType struct {
 
 func (m *mockBackendType) Type() BackendType {
 	return m.backendType
+}
+
+func (m *mockBackendType) Close() error {
+	return nil
 }
 
 // TestClient_CloneWithToken_Delegation tests that CloneWithToken returns a Client wrapping the cloned Backend

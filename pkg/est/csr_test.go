@@ -109,6 +109,10 @@ func TestReadCSRPayloadSizeLimit(t *testing.T) {
 	_, err := ReadCSRPayload(req)
 	if err == nil {
 		t.Error("ReadCSRPayload() should fail with oversized body")
+		return
+	}
+	if !strings.Contains(err.Error(), "too large") {
+		t.Errorf("Expected oversized body error, got: %v", err)
 	}
 }
 

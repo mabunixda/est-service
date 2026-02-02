@@ -141,7 +141,7 @@ func (m *Manager) authenticateToken(ctx context.Context, r *http.Request) *Resul
 		}
 	}
 
-	m.logger.Info("Token authentication successful", "identity", identity)
+	m.logger.Info("Token authentication successful")
 
 	return &Result{
 		Authenticated: true,
@@ -164,15 +164,12 @@ func (m *Manager) authenticateCert(ctx context.Context, r *http.Request) *Result
 	}
 
 	clientCert := r.TLS.PeerCertificates[0]
-	m.logger.Debug("Client certificate found in TLS connection",
-		"subject", clientCert.Subject.String(),
-		"issuer", clientCert.Issuer.String())
+	m.logger.Debug("Client certificate found in TLS connection")
 
 	// Authenticate with backend
 	token, err := m.backend.AuthenticateCert(ctx, m.config.CertMountPath, r.TLS, m.config.CertRole)
 	if err != nil {
 		m.logger.Debug("Certificate authentication failed",
-			"subject", clientCert.Subject.String(),
 			"error", err)
 		return &Result{
 			Authenticated: false,
@@ -181,9 +178,7 @@ func (m *Manager) authenticateCert(ctx context.Context, r *http.Request) *Result
 	}
 
 	identity := clientCert.Subject.CommonName
-	m.logger.Info("Certificate authentication successful",
-		"identity", identity,
-		"subject", clientCert.Subject.String())
+	m.logger.Info("Certificate authentication successful")
 
 	return &Result{
 		Authenticated: true,
@@ -227,11 +222,35 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 
 	username, password := parts[0], parts[1]
 
-	// Authenticate with backend
+	// Authenticate with backend IMMEDIATELY
+	// We want to minimize the time the password stays in memory
 	token, err := m.backend.AuthenticateUserpass(ctx, m.config.UserpassMountPath, username, password)
+
+	// SECURITY: Scrub password from memory immediately after use
+	// This reduces the window of exposure, though Go's GC may have already created copies.
+	// We overwrite both the string data and the parts slice to be thorough.
+	if len(password) > 0 {
+		// Convert password string to byte slice for overwriting
+		// Note: In Go, strings are immutable, so we can't directly overwrite them.
+		// However, we can overwrite the underlying byte slice if we have access to it.
+		// The best we can do is overwrite the parts slice and clear references.
+
+		// Overwrite the decoded byte slice (contains "username:password")
+		for i := range decoded {
+			decoded[i] = 0
+		}
+
+		// Clear the parts slice
+		for i := range parts {
+			parts[i] = ""
+		}
+
+		// Clear password variable by reassigning
+		password = ""
+	}
+
 	if err != nil {
 		m.logger.Debug("Userpass authentication failed",
-			"username", username,
 			"error", err)
 		return &Result{
 			Authenticated: false,
@@ -239,7 +258,7 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 		}
 	}
 
-	m.logger.Info("Userpass authentication successful", "username", username)
+	m.logger.Info("Userpass authentication successful")
 
 	return &Result{
 		Authenticated: true,

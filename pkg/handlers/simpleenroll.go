@@ -64,19 +64,13 @@ func (h *SimpleEnrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 	ctx := r.Context()
 
-	// DEBUG: Log TLS connection state
+	// DEBUG: Log TLS connection state (redacted)
 	if r.TLS == nil {
-		h.logger.Warn("TLS connection state is NIL")
+		h.logger.Debug("TLS connection state is NIL")
 	} else {
-		h.logger.Info("TLS connection state available",
+		h.logger.Debug("TLS connection state available",
 			"peer_certs_count", len(r.TLS.PeerCertificates),
-			"version", r.TLS.Version,
-			"server_name", r.TLS.ServerName)
-		if len(r.TLS.PeerCertificates) > 0 {
-			h.logger.Info("Client certificate present in TLS",
-				"subject", r.TLS.PeerCertificates[0].Subject.String(),
-				"issuer", r.TLS.PeerCertificates[0].Issuer.String())
-		}
+			"version", r.TLS.Version)
 	}
 
 	authResult := h.authMgr.Authenticate(ctx, r)
@@ -94,13 +88,18 @@ func (h *SimpleEnrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	h.logger.Info("Request authenticated",
-		"method", authResult.Method,
-		"identity", authResult.Identity)
+		"method", authResult.Method)
 
-	csr, err := est.ReadCSRPayload(r)
+	csr, err := est.ReadCSRPayloadWithLimit(r, h.config.MaxCSRSize)
 	if err != nil {
 		h.logger.Error("Failed to parse CSR", "error", err)
 		http.Error(w, "Invalid CSR", http.StatusBadRequest)
+		return
+	}
+
+	if err := est.ValidateCSRSignatureAlgorithm(csr, h.config.AllowedSignatureAlgos); err != nil {
+		h.logger.Error("Disallowed CSR signature algorithm", "error", err)
+		http.Error(w, "Invalid CSR signature algorithm", http.StatusBadRequest)
 		return
 	}
 
@@ -144,10 +143,7 @@ func (h *SimpleEnrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	h.logger.Info("Certificate enrolled successfully",
-		"subject", cert.Subject.String(),
-		"serial", cert.SerialNumber.String(),
-		"ttl", enrollReq.Policy.TTL,
-		"identity", authResult.Identity)
+		"ttl", enrollReq.Policy.TTL)
 }
 
 func (h *SimpleEnrollHandler) processEnrollment(ctx context.Context, req *EnrollmentRequest) (*x509.Certificate, error) {

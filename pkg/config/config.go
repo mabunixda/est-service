@@ -18,9 +18,11 @@ type ServerConfig struct {
 	ListenAddress string          `yaml:"listen_address"`
 	TLS           TLSConfig       `yaml:"tls"`
 	RateLimit     RateLimitConfig `yaml:"rate_limit"`
-	ReadTimeout   time.Duration   `yaml:"read_timeout"`
-	WriteTimeout  time.Duration   `yaml:"write_timeout"`
-	IdleTimeout   time.Duration   `yaml:"idle_timeout"`
+	// InternalEndpointsAuth controls auth for internal endpoints like /metrics and /swagger
+	InternalEndpointsAuth *bool         `yaml:"internal_endpoints_auth"`
+	ReadTimeout           time.Duration `yaml:"read_timeout"`
+	WriteTimeout          time.Duration `yaml:"write_timeout"`
+	IdleTimeout           time.Duration `yaml:"idle_timeout"`
 }
 
 // TLSConfig configures TLS settings
@@ -35,8 +37,13 @@ type TLSConfig struct {
 // RateLimitConfig configures rate limiting per IP
 type RateLimitConfig struct {
 	Enabled           bool `yaml:"enabled"`             // Enable rate limiting
-	RequestsPerSecond int  `yaml:"requests_per_second"` // Requests per second per IP
-	Burst             int  `yaml:"burst"`               // Maximum burst size
+	RequestsPerSecond int  `yaml:"requests_per_second"` // Requests per second per IP (general endpoints)
+	Burst             int  `yaml:"burst"`               // Maximum burst size (general endpoints)
+	// TrustedProxyCIDRs defines which proxy IPs can be trusted for X-Forwarded-For
+	TrustedProxyCIDRs []string `yaml:"trusted_proxy_cidrs"`
+	// Authentication endpoint specific rate limits (stricter to prevent brute force)
+	AuthRequestsPerSecond int `yaml:"auth_requests_per_second"` // Requests per second for auth endpoints (0 = use general limit)
+	AuthBurst             int `yaml:"auth_burst"`               // Burst size for auth endpoints (0 = use general burst)
 }
 
 // BackendConfig configures the backend client (OpenBao or Vault)
@@ -124,6 +131,7 @@ type MetricsConfig struct {
 	Enabled        bool   `yaml:"enabled"`
 	PrometheusPort int    `yaml:"prometheus_port"` // Port for Prometheus scraping (0 to disable)
 	OTLPEndpoint   string `yaml:"otlp_endpoint"`   // OTLP endpoint for metrics export (empty to disable)
+	OTLPInsecure   bool   `yaml:"otlp_insecure"`   // Allow insecure OTLP (HTTP) - not recommended for production
 }
 
 // LoggingConfig configures logging

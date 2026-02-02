@@ -127,16 +127,16 @@ func SendBackendError(w http.ResponseWriter, err error, operation string) {
 	var errorMsg string
 	switch backendErr.StatusCode {
 	case http.StatusForbidden:
-		errorMsg = fmt.Sprintf("%s. The EST service may lack permissions to sign certificates with the configured PKI role. Details: %s",
-			backendErr.Message, backendErr.Details)
+		errorMsg = fmt.Sprintf("%s. The EST service may lack permissions to sign certificates with the configured PKI role.",
+			backendErr.Message)
 	case http.StatusServiceUnavailable:
-		errorMsg = fmt.Sprintf("%s. Please try again later or contact your administrator. Details: %s",
-			backendErr.Message, backendErr.Details)
+		errorMsg = fmt.Sprintf("%s. Please try again later or contact your administrator.",
+			backendErr.Message)
 	case http.StatusBadGateway:
-		errorMsg = fmt.Sprintf("%s during %s. Details: %s",
-			backendErr.Message, operation, backendErr.Details)
+		errorMsg = fmt.Sprintf("%s during %s.",
+			backendErr.Message, operation)
 	default:
-		errorMsg = fmt.Sprintf("%s. Details: %s", backendErr.Message, backendErr.Details)
+		errorMsg = backendErr.Message
 	}
 
 	http.Error(w, errorMsg, backendErr.StatusCode)

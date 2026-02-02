@@ -343,11 +343,17 @@ func TestRateLimiterShutdown_StopsCleanup(t *testing.T) {
 // ============================================================================
 
 func TestGetClientIP_MultipleForwardedIPs(t *testing.T) {
+	rl := NewRateLimiter(10, 20)
+	defer rl.Shutdown()
+	if err := rl.SetTrustedProxyCIDRs([]string{"10.0.0.0/8"}); err != nil {
+		t.Fatalf("failed to set trusted proxies: %v", err)
+	}
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-Forwarded-For", "203.0.113.1, 198.51.100.1, 192.0.2.1")
 	req.RemoteAddr = "10.0.0.1:12345"
 
-	ip := getClientIP(req)
+	ip := rl.getClientIP(req)
 
 	// Should use first IP from X-Forwarded-For
 	if ip != "203.0.113.1" {
@@ -356,11 +362,17 @@ func TestGetClientIP_MultipleForwardedIPs(t *testing.T) {
 }
 
 func TestGetClientIP_WhitespaceInHeader(t *testing.T) {
+	rl := NewRateLimiter(10, 20)
+	defer rl.Shutdown()
+	if err := rl.SetTrustedProxyCIDRs([]string{"10.0.0.0/8"}); err != nil {
+		t.Fatalf("failed to set trusted proxies: %v", err)
+	}
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.Header.Set("X-Forwarded-For", "  203.0.113.1  ")
 	req.RemoteAddr = "10.0.0.1:12345"
 
-	ip := getClientIP(req)
+	ip := rl.getClientIP(req)
 
 	// Should trim whitespace
 	if ip != "203.0.113.1" {
@@ -369,10 +381,13 @@ func TestGetClientIP_WhitespaceInHeader(t *testing.T) {
 }
 
 func TestGetClientIP_IPv6(t *testing.T) {
+	rl := NewRateLimiter(10, 20)
+	defer rl.Shutdown()
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.RemoteAddr = "[2001:db8::1]:12345"
 
-	ip := getClientIP(req)
+	ip := rl.getClientIP(req)
 
 	// Should extract IPv6 address
 	if ip != "2001:db8::1" {
@@ -381,10 +396,13 @@ func TestGetClientIP_IPv6(t *testing.T) {
 }
 
 func TestGetClientIP_MalformedRemoteAddr(t *testing.T) {
+	rl := NewRateLimiter(10, 20)
+	defer rl.Shutdown()
+
 	req := httptest.NewRequest("GET", "/test", nil)
 	req.RemoteAddr = "malformed"
 
-	ip := getClientIP(req)
+	ip := rl.getClientIP(req)
 
 	// Should fall back to full RemoteAddr
 	if ip != "malformed" {

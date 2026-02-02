@@ -51,6 +51,11 @@ type Backend interface {
 	// This allows per-request token usage for proper Vault audit trails
 	CloneWithToken(ctx context.Context, token string) (Backend, error)
 
+	// Close cleans up resources and scrubs tokens from memory.
+	// This should be called when the backend client is no longer needed,
+	// especially for cloned instances with per-request tokens.
+	Close() error
+
 	// Metadata
 	Type() BackendType
 }
