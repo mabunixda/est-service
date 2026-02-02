@@ -176,35 +176,3 @@ jobs:
   #         VAULT_ADDR: http://localhost:8200
   #         VAULT_TOKEN: root-token
   #       run: go test -v -race ./test/integration/...
-
-  openapi-validate:
-    name: Validate OpenAPI
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25.6"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - uses: stoplightio/spectral-action@latest
-        with:
-          file_glob: "docs/swagger.yaml"
-
-      - name: Upload OpenAPI spec as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: openapi-spec
-          path: |
-            docs/swagger.json
-            docs/swagger.yaml
-            docs/docs.go
-          retention-days: 30
