@@ -1,12 +1,8 @@
 name: Security Scanning
 
-permissions:
-  contents: read
-  security-events: write
-
 on:
   push:
-    branches: [main, initial-coding]
+    branches: [main]
   pull_request:
     branches: [main]
   schedule:

@@ -3,7 +3,7 @@ name: OpenAPI Validation
 
 on:
   push:
-    branches: [main, initial-coding]
+    branches: [main]
     paths:
       - 'docs/swagger.*'
   pull_request:
