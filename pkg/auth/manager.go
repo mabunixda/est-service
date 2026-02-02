@@ -24,6 +24,10 @@ type Config struct {
 	UserpassEnabled   bool
 	UserpassMountPath string
 
+	// AppRole authentication
+	AppRoleEnabled   bool
+	AppRoleMountPath string
+
 	// Certificate authentication
 	CertEnabled   bool
 	CertMountPath string
@@ -54,6 +58,9 @@ func NewManager(backend backend.Backend, config *Config, logger *slog.Logger) *M
 	if config.CertMountPath == "" {
 		config.CertMountPath = "cert"
 	}
+	if config.AppRoleMountPath == "" {
+		config.AppRoleMountPath = "approle"
+	}
 
 	return &Manager{
 		backend: backend,
@@ -82,7 +89,7 @@ func (m *Manager) Authenticate(ctx context.Context, r *http.Request) *Result {
 	}
 
 	// Try HTTP Basic Auth
-	if m.config.UserpassEnabled {
+	if m.config.UserpassEnabled || m.config.AppRoleEnabled {
 		if result := m.authenticateBasic(ctx, r); result.Authenticated {
 			return result
 		}
@@ -202,12 +209,12 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 
 	// Decode credentials
 	encoded := strings.TrimPrefix(authHeader, "Basic ")
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		m.logger.Debug("Failed to decode basic auth", "error", err)
+	decoded, decodeErr := base64.StdEncoding.DecodeString(encoded)
+	if decodeErr != nil {
+		m.logger.Debug("Failed to decode basic auth", "error", decodeErr)
 		return &Result{
 			Authenticated: false,
-			Error:         err,
+			Error:         decodeErr,
 		}
 	}
 
@@ -222,9 +229,46 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 
 	username, password := parts[0], parts[1]
 
+	var (
+		token           string
+		err             error
+		userpassError   error
+		appRoleError    error
+		triedUserpass   bool
+		triedAppRole    bool
+	)
+
 	// Authenticate with backend IMMEDIATELY
 	// We want to minimize the time the password stays in memory
-	token, err := m.backend.AuthenticateUserpass(ctx, m.config.UserpassMountPath, username, password)
+	if m.config.UserpassEnabled {
+		triedUserpass = true
+		token, err = m.backend.AuthenticateUserpass(ctx, m.config.UserpassMountPath, username, password)
+		if err == nil {
+			m.logger.Info("Userpass authentication successful")
+			return &Result{
+				Authenticated: true,
+				Token:         token,
+				Method:        "userpass",
+				Identity:      username,
+			}
+		}
+		userpassError = err
+	}
+
+	if m.config.AppRoleEnabled {
+		triedAppRole = true
+		token, err = m.backend.AuthenticateAppRole(ctx, m.config.AppRoleMountPath, username, password)
+		if err == nil {
+			m.logger.Info("AppRole authentication successful")
+			return &Result{
+				Authenticated: true,
+				Token:         token,
+				Method:        "approle",
+				Identity:      "approle",
+			}
+		}
+		appRoleError = err
+	}
 
 	// SECURITY: Scrub password from memory immediately after use
 	// This reduces the window of exposure, though Go's GC may have already created copies.
@@ -249,22 +293,24 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 		_ = password // Mark as intentionally unused after this point
 	}
 
-	if err != nil {
+	if triedUserpass && userpassError != nil {
 		m.logger.Debug("Userpass authentication failed",
-			"error", err)
+			"error", userpassError)
+	}
+	if triedAppRole && appRoleError != nil {
+		m.logger.Debug("AppRole authentication failed",
+			"error", appRoleError)
+	}
+	if err != nil {
 		return &Result{
 			Authenticated: false,
 			Error:         err,
 		}
 	}
 
-	m.logger.Info("Userpass authentication successful")
-
 	return &Result{
-		Authenticated: true,
-		Token:         token,
-		Method:        "userpass",
-		Identity:      username,
+		Authenticated: false,
+		Error:         fmt.Errorf("no basic authentication methods enabled"),
 	}
 }
 
@@ -273,6 +319,10 @@ func (m *Manager) GetWWWAuthenticateHeaders() []string {
 	var headers []string
 
 	if m.config.UserpassEnabled {
+		headers = append(headers, `Basic realm="EST Service"`)
+	}
+
+	if m.config.AppRoleEnabled && !m.config.UserpassEnabled {
 		headers = append(headers, `Basic realm="EST Service"`)
 	}
 

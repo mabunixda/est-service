@@ -88,12 +88,19 @@ type PolicyConfig struct {
 // AuthenticatorsConfig configures authentication methods
 type AuthenticatorsConfig struct {
 	Userpass UserpassAuthConfig `yaml:"userpass"`
+	AppRole  AppRoleAuthConfig  `yaml:"approle"`
 	Cert     CertAuthConfig     `yaml:"cert"`
 	Token    TokenAuthConfig    `yaml:"token"`
 }
 
 // UserpassAuthConfig configures userpass authentication
 type UserpassAuthConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	MountPath string `yaml:"mount_path"`
+}
+
+// AppRoleAuthConfig configures AppRole authentication
+type AppRoleAuthConfig struct {
 	Enabled   bool   `yaml:"enabled"`
 	MountPath string `yaml:"mount_path"`
 }

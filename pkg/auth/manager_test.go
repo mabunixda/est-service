@@ -3,9 +3,12 @@ package auth
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"log/slog"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/mabunixda/est-service/pkg/backend"
 )
 
 func TestManager(t *testing.T) {
@@ -14,21 +17,25 @@ func TestManager(t *testing.T) {
 		config             *Config
 		expectUserpassPath string
 		expectCertPath     string
+		expectAppRolePath  string
 	}{
 		{
 			name:               "default mount paths",
 			config:             &Config{},
 			expectUserpassPath: "userpass",
 			expectCertPath:     "cert",
+			expectAppRolePath:  "approle",
 		},
 		{
 			name: "custom mount paths",
 			config: &Config{
 				UserpassMountPath: "custom-userpass",
 				CertMountPath:     "custom-cert",
+				AppRoleMountPath:  "custom-approle",
 			},
 			expectUserpassPath: "custom-userpass",
 			expectCertPath:     "custom-cert",
+			expectAppRolePath:  "custom-approle",
 		},
 	}
 
@@ -44,6 +51,11 @@ func TestManager(t *testing.T) {
 			if mgr.config.CertMountPath != tt.expectCertPath {
 				t.Errorf("Expected CertMountPath '%s', got '%s'",
 					tt.expectCertPath, mgr.config.CertMountPath)
+			}
+
+			if mgr.config.AppRoleMountPath != tt.expectAppRolePath {
+				t.Errorf("Expected AppRoleMountPath '%s', got '%s'",
+					tt.expectAppRolePath, mgr.config.AppRoleMountPath)
 			}
 
 			if mgr.logger == nil {
@@ -84,6 +96,16 @@ func TestGetWWWAuthenticateHeaders(t *testing.T) {
 			config: &Config{
 				UserpassEnabled: true,
 				TokenEnabled:    false,
+			},
+			expectedCount:  1,
+			expectedBasic:  true,
+			expectedBearer: false,
+		},
+		{
+			name: "only AppRole basic auth",
+			config: &Config{
+				AppRoleEnabled: true,
+				TokenEnabled:   false,
 			},
 			expectedCount:  1,
 			expectedBasic:  true,
@@ -196,6 +218,64 @@ func TestAuthenticateBasic_InvalidFormat(t *testing.T) {
 	}
 	if result.Error == nil {
 		t.Error("Expected error for invalid format")
+	}
+}
+
+func TestAuthenticateBasic_AppRoleSuccess(t *testing.T) {
+	mock := &backend.MockBackend{
+		AuthenticateAppRoleFunc: func(ctx context.Context, mount, roleID, secretID string) (string, error) {
+			if mount != "approle" {
+				return "", errors.New("unexpected mount")
+			}
+			if roleID == "role-id" && secretID == "secret-id" {
+				return "approle-token", nil
+			}
+			return "", errors.New("invalid credentials")
+		},
+	}
+
+	mgr := NewManager(mock, &Config{AppRoleEnabled: true, AppRoleMountPath: "approle"}, slog.Default())
+
+	req := httptest.NewRequest("GET", "/", nil)
+	creds := base64.StdEncoding.EncodeToString([]byte("role-id:secret-id"))
+	req.Header.Set("Authorization", "Basic "+creds)
+
+	result := mgr.authenticateBasic(context.Background(), req)
+
+	if !result.Authenticated {
+		t.Error("Expected authentication to succeed with AppRole")
+	}
+	if result.Method != "approle" {
+		t.Errorf("Expected method 'approle', got '%s'", result.Method)
+	}
+}
+
+func TestAuthenticateBasic_UserpassFails_AppRoleSucceeds(t *testing.T) {
+	mock := &backend.MockBackend{
+		AuthenticateUserpassFunc: func(ctx context.Context, mount, username, password string) (string, error) {
+			return "", errors.New("userpass failed")
+		},
+		AuthenticateAppRoleFunc: func(ctx context.Context, mount, roleID, secretID string) (string, error) {
+			return "approle-token", nil
+		},
+	}
+
+	mgr := NewManager(mock, &Config{
+		UserpassEnabled: true,
+		AppRoleEnabled:  true,
+	}, slog.Default())
+
+	req := httptest.NewRequest("GET", "/", nil)
+	creds := base64.StdEncoding.EncodeToString([]byte("role-id:secret-id"))
+	req.Header.Set("Authorization", "Basic "+creds)
+
+	result := mgr.authenticateBasic(context.Background(), req)
+
+	if !result.Authenticated {
+		t.Error("Expected authentication to succeed via AppRole fallback")
+	}
+	if result.Method != "approle" {
+		t.Errorf("Expected method 'approle', got '%s'", result.Method)
 	}
 }
 

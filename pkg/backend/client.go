@@ -66,6 +66,11 @@ func (c *Client) AuthenticateUserpass(ctx context.Context, mount, username, pass
 	return c.backend.AuthenticateUserpass(ctx, mount, username, password)
 }
 
+// AuthenticateAppRole authenticates using the AppRole backend
+func (c *Client) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
+	return c.backend.AuthenticateAppRole(ctx, mount, roleID, secretID)
+}
+
 // AuthenticateCert authenticates using the certificate backend
 func (c *Client) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
 	return c.backend.AuthenticateCert(ctx, mount, connState, role)

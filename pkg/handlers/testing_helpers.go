@@ -68,6 +68,13 @@ func (m *mockBackendHandlers) AuthenticateUserpass(ctx context.Context, mount, u
 	return "", fmt.Errorf("invalid credentials")
 }
 
+func (m *mockBackendHandlers) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
+	if roleID == "test-role" && secretID == "test-secret" {
+		return "approle-token", nil
+	}
+	return "", fmt.Errorf("invalid approle credentials")
+}
+
 func (m *mockBackendHandlers) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
 	if connState != nil && len(connState.PeerCertificates) > 0 {
 		return "cert-token", nil

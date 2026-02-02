@@ -45,9 +45,12 @@ est:
     userpass:
       enabled: true
       mount_path: "userpass"
-    cert:
-      enabled: true
-      mount_path: "cert"
+      cert:
+        enabled: true
+        mount_path: "cert"
+      approle:
+        enabled: false
+        mount_path: "approle"
     token:
       enabled: true
 

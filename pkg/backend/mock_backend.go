@@ -22,6 +22,7 @@ type MockBackend struct {
 
 	// Authentication Operations
 	AuthenticateUserpassFunc func(ctx context.Context, mount, username, password string) (string, error)
+	AuthenticateAppRoleFunc  func(ctx context.Context, mount, roleID, secretID string) (string, error)
 	AuthenticateCertFunc     func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error)
 	ValidateTokenFunc        func(ctx context.Context, token string) (bool, error)
 	LookupTokenFunc          func(ctx context.Context, token string) (map[string]interface{}, error)
@@ -99,6 +100,14 @@ func (m *MockBackend) AuthenticateUserpass(ctx context.Context, mount, username,
 	return "", nil
 }
 
+// AuthenticateAppRole implements Backend.AuthenticateAppRole
+func (m *MockBackend) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
+	if m.AuthenticateAppRoleFunc != nil {
+		return m.AuthenticateAppRoleFunc(ctx, mount, roleID, secretID)
+	}
+	return "", nil
+}
+
 // AuthenticateCert implements Backend.AuthenticateCert
 func (m *MockBackend) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
 	if m.AuthenticateCertFunc != nil {
@@ -160,6 +169,7 @@ func (m *MockBackend) CloneWithToken(ctx context.Context, token string) (Backend
 		SignCSRVerbatimFunc:      m.SignCSRVerbatimFunc,
 		GetIssuerPEMFunc:         m.GetIssuerPEMFunc,
 		AuthenticateUserpassFunc: m.AuthenticateUserpassFunc,
+		AuthenticateAppRoleFunc:  m.AuthenticateAppRoleFunc,
 		AuthenticateCertFunc:     m.AuthenticateCertFunc,
 		ValidateTokenFunc:        m.ValidateTokenFunc,
 		LookupTokenFunc:          m.LookupTokenFunc,

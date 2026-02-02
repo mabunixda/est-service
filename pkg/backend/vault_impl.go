@@ -333,6 +333,30 @@ func (b *vaultBackend) AuthenticateUserpass(ctx context.Context, mount, username
 	return secret.Auth.ClientToken, nil
 }
 
+// AuthenticateAppRole authenticates using the AppRole backend
+func (b *vaultBackend) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
+	path := fmt.Sprintf("auth/%s/login", mount)
+
+	data := map[string]interface{}{
+		"role_id":   roleID,
+		"secret_id": secretID,
+	}
+
+	secret, err := b.client.Logical().WriteWithContext(ctx, path, data)
+	if err != nil {
+		return "", fmt.Errorf("authentication failed: %w", err)
+	}
+
+	if secret == nil || secret.Auth == nil {
+		return "", fmt.Errorf("no auth token returned")
+	}
+
+	b.logger.Info("AppRole authentication successful on Vault",
+		"mount", mount)
+
+	return secret.Auth.ClientToken, nil
+}
+
 // AuthenticateCert authenticates using the certificate backend
 //
 // IMPORTANT: Vault cert auth validates certificates during the TLS handshake.

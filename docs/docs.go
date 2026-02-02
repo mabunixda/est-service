@@ -254,7 +254,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{"https", "http"},
 	Title:            "EST Service API",
-	Description:      "Enrollment over Secure Transport (EST) Service implementing RFC 7030.\nThis service provides a standards-compliant EST implementation that uses OpenBao or HashiCorp Vault as the backend PKI system.\n\n**Authentication Methods:**\n- HTTP Basic Auth (mapped to backend userpass)\n- TLS Client Certificates (mapped to backend cert auth)\n- Bearer Token (backend token authentication)",
+    Description:      "Enrollment over Secure Transport (EST) Service implementing RFC 7030.\nThis service provides a standards-compliant EST implementation that uses OpenBao or HashiCorp Vault as the backend PKI system.\n\n**Authentication Methods:**\n- HTTP Basic Auth (mapped to backend userpass or AppRole)\n- TLS Client Certificates (mapped to backend cert auth)\n- Bearer Token (backend token authentication)",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

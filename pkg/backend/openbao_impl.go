@@ -331,6 +331,30 @@ func (b *openBaoBackend) AuthenticateUserpass(ctx context.Context, mount, userna
 	return secret.Auth.ClientToken, nil
 }
 
+// AuthenticateAppRole authenticates using the AppRole backend
+func (b *openBaoBackend) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
+	path := fmt.Sprintf("auth/%s/login", mount)
+
+	data := map[string]interface{}{
+		"role_id":   roleID,
+		"secret_id": secretID,
+	}
+
+	secret, err := b.client.Logical().WriteWithContext(ctx, path, data)
+	if err != nil {
+		return "", fmt.Errorf("authentication failed: %w", err)
+	}
+
+	if secret == nil || secret.Auth == nil {
+		return "", fmt.Errorf("no auth token returned")
+	}
+
+	b.logger.Info("AppRole authentication successful on OpenBao",
+		"mount", mount)
+
+	return secret.Auth.ClientToken, nil
+}
+
 // AuthenticateCert authenticates using the certificate backend
 //
 // IMPORTANT: OpenBao cert auth validates certificates during the TLS handshake.

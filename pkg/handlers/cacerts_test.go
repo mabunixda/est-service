@@ -29,6 +29,7 @@ type mockBackend struct {
 	signCSRVerbatimFunc      func(ctx context.Context, mount string, csr *x509.CertificateRequest, ttl string) (*x509.Certificate, error)
 	getIssuerPEMFunc         func(ctx context.Context, mount, issuer string) (string, error)
 	authenticateUserpassFunc func(ctx context.Context, mount, username, password string) (string, error)
+	authenticateAppRoleFunc  func(ctx context.Context, mount, roleID, secretID string) (string, error)
 	authenticateCertFunc     func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error)
 	validateTokenFunc        func(ctx context.Context, token string) (bool, error)
 	lookupTokenFunc          func(ctx context.Context, token string) (map[string]interface{}, error)
@@ -84,6 +85,13 @@ func (m *mockBackend) GetIssuerPEM(ctx context.Context, mount, issuer string) (s
 func (m *mockBackend) AuthenticateUserpass(ctx context.Context, mount, username, password string) (string, error) {
 	if m.authenticateUserpassFunc != nil {
 		return m.authenticateUserpassFunc(ctx, mount, username, password)
+	}
+	return "", nil
+}
+
+func (m *mockBackend) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
+	if m.authenticateAppRoleFunc != nil {
+		return m.authenticateAppRoleFunc(ctx, mount, roleID, secretID)
 	}
 	return "", nil
 }

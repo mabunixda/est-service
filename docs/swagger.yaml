@@ -9,7 +9,7 @@ info:
     This service provides a standards-compliant EST implementation that uses OpenBao or HashiCorp Vault as the backend PKI system.
 
     **Authentication Methods:**
-    - HTTP Basic Auth (mapped to backend userpass)
+    - HTTP Basic Auth (mapped to backend userpass or AppRole)
     - TLS Client Certificates (mapped to backend cert auth)
     - Bearer Token (backend token authentication)
   license:

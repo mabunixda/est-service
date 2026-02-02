@@ -8,7 +8,7 @@ info:
     OpenBao or HashiCorp Vault as the backend PKI system.
 
     **Authentication Methods:**
-    - HTTP Basic Auth (mapped to backend userpass)
+    - HTTP Basic Auth (mapped to backend userpass or AppRole)
     - TLS Client Certificates (mapped to backend cert auth)
     - Bearer Token (backend token authentication)
   version: 1.0.0
@@ -241,7 +241,7 @@ components:
     basicAuth:
       type: http
       scheme: basic
-      description: HTTP Basic Authentication mapped to backend userpass authentication
+      description: HTTP Basic Authentication mapped to backend userpass or AppRole authentication
 
     bearerAuth:
       type: http

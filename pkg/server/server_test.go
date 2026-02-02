@@ -96,6 +96,9 @@ func (m *mockBackend) GetIssuerPEM(ctx context.Context, mount, issuer string) (s
 func (m *mockBackend) AuthenticateUserpass(ctx context.Context, mount, username, password string) (string, error) {
 	return "", nil
 }
+func (m *mockBackend) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
+	return "", nil
+}
 func (m *mockBackend) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
 	return "", nil
 }
