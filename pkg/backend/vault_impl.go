@@ -142,7 +142,11 @@ func (b *vaultBackend) GetCAChain(ctx context.Context, mount string) ([]*x509.Ce
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA chain: %w", err)
 	}
-	defer rawResp.Body.Close()
+	defer func() {
+		if closeErr := rawResp.Body.Close(); closeErr != nil {
+			b.logger.Warn("Failed to close response body", "error", closeErr)
+		}
+	}()
 
 	chainPEM, err := io.ReadAll(rawResp.Body)
 	if err != nil {

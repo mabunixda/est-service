@@ -140,7 +140,11 @@ func (b *openBaoBackend) GetCAChain(ctx context.Context, mount string) ([]*x509.
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA chain: %w", err)
 	}
-	defer rawResp.Body.Close()
+	defer func() {
+		if closeErr := rawResp.Body.Close(); closeErr != nil {
+			b.logger.Warn("Failed to close response body", "error", closeErr)
+		}
+	}()
 
 	chainPEM, err := io.ReadAll(rawResp.Body)
 	if err != nil {
@@ -381,6 +385,13 @@ func (b *openBaoBackend) AuthenticateCert(ctx context.Context, mount string, con
 
 // createCertAuthClient creates a temporary API client configured with the client certificate
 // This is necessary because Vault/OpenBao cert auth validates the certificate during TLS handshake
+//
+// NOTE: This function is currently unused and kept for future implementation reference.
+// The challenge is that we don't have access to the client's private key in the ConnectionState,
+// which is required for certificate-based authentication to the backend.
+// For now, cert auth relies on the EST service's own client certificate configured in the backend.
+//
+//nolint:unused // Keeping for future implementation
 func (b *openBaoBackend) createCertAuthClient(connState *tls.ConnectionState) (*api.Client, error) {
 	if connState == nil || len(connState.PeerCertificates) == 0 {
 		return nil, fmt.Errorf("no client certificates available")
@@ -399,13 +410,10 @@ func (b *openBaoBackend) createCertAuthClient(connState *tls.ConnectionState) (*
 		return nil, fmt.Errorf("unexpected transport type")
 	}
 
-	// Clone the TLS config
-	tlsConfig := transport.TLSClientConfig
-	if tlsConfig == nil {
-		tlsConfig = &tls.Config{}
-	} else {
-		tlsConfig = tlsConfig.Clone()
-	}
+	// Note: Would need to access transport.TLSClientConfig and clone it here for client cert setup,
+	// but we don't have the private key available in ConnectionState.
+	// The tlsConfig would need to be modified and set back to the transport.
+	_ = transport // Silence unused warning
 
 	// IMPORTANT: We need to reconstruct the tls.Certificate with both cert and private key
 	// However, the ConnectionState only gives us the certificate, not the private key.

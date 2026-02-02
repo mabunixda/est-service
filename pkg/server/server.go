@@ -257,7 +257,6 @@ func (s *Server) Start(ctx context.Context) error {
 	// Start server in a goroutine
 	errChan := make(chan error, 1)
 	go func() {
-		var err error
 		if s.config.TLSConfig != nil && s.config.TLSConfig.CertFile != "" && s.config.TLSConfig.KeyFile != "" {
 			s.logger.Info("Starting HTTPS server",
 				"cert", s.config.TLSConfig.CertFile,
@@ -278,14 +277,14 @@ func (s *Server) Start(ctx context.Context) error {
 			tlsListener := tls.NewListener(ln, s.httpServer.TLSConfig)
 
 			// Serve using the TLS listener
-			err = s.httpServer.Serve(tlsListener)
+			if err := s.httpServer.Serve(tlsListener); err != nil && err != http.ErrServerClosed {
+				errChan <- err
+			}
 		} else {
 			s.logger.Info("Starting HTTP server")
-			err = s.httpServer.ListenAndServe()
-		}
-
-		if err != nil && err != http.ErrServerClosed {
-			errChan <- err
+			if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				errChan <- err
+			}
 		}
 	}()
 
@@ -397,7 +396,9 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"ok","backend":"healthy"}`)
+	if _, err := fmt.Fprintf(w, `{"status":"ok","backend":"healthy"}`); err != nil {
+		s.logger.Error("Failed to write health response", "error", err)
+	}
 }
 
 // readyHandler handles readiness check requests
@@ -415,7 +416,9 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprintf(w, `{"status":"ready"}`)
+	if _, err := fmt.Fprintf(w, `{"status":"ready"}`); err != nil {
+		s.logger.Error("Failed to write ready response", "error", err)
+	}
 }
 
 // responseWriter wraps http.ResponseWriter to capture status code
