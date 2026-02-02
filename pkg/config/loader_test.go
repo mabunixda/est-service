@@ -70,6 +70,8 @@ observability:
   logging:
     level: "debug"
     format: "json"
+    stdout: true
+    file: ""
 `
 		tmpFile, err := os.CreateTemp("", "config-*.yaml")
 		if err != nil {
@@ -109,6 +111,9 @@ observability:
 
 		if cfg.Observability.Logging.Level != "debug" {
 			t.Errorf("Expected log level debug, got %s", cfg.Observability.Logging.Level)
+		}
+		if cfg.Observability.Logging.Stdout == nil || !*cfg.Observability.Logging.Stdout {
+			t.Error("Expected logging stdout to be true")
 		}
 	})
 
@@ -158,6 +163,12 @@ backend:
 
 		if cfg.Observability.Logging.Format != "json" {
 			t.Error("Default log format not applied")
+		}
+		if cfg.Observability.Logging.Stdout == nil || !*cfg.Observability.Logging.Stdout {
+			t.Error("Default logging stdout not applied")
+		}
+		if cfg.Observability.Audit.Stdout == nil || !*cfg.Observability.Audit.Stdout {
+			t.Error("Default audit stdout not applied")
 		}
 	})
 

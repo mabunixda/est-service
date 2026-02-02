@@ -124,6 +124,7 @@ type ObservabilityConfig struct {
 	Metrics MetricsConfig `yaml:"metrics"`
 	Logging LoggingConfig `yaml:"logging"`
 	Tracing TracingConfig `yaml:"tracing"`
+	Audit   AuditConfig   `yaml:"audit"`
 }
 
 // MetricsConfig configures metrics collection via OpenTelemetry
@@ -138,10 +139,19 @@ type MetricsConfig struct {
 type LoggingConfig struct {
 	Level  string `yaml:"level"`  // debug, info, warn, error
 	Format string `yaml:"format"` // json, text
+	Stdout *bool  `yaml:"stdout"` // Enable stdout logging (default: true)
+	File   string `yaml:"file"`   // Optional file path for logging
 }
 
 // TracingConfig configures distributed tracing
 type TracingConfig struct {
 	Enabled  bool   `yaml:"enabled"`
 	Endpoint string `yaml:"endpoint"`
+}
+
+// AuditConfig configures structured audit logging
+type AuditConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Stdout  *bool  `yaml:"stdout"` // Enable stdout audit logging (default: true)
+	File    string `yaml:"file"`   // Optional file path for audit logging
 }

@@ -28,9 +28,13 @@ func TestSetupLogger_LogLevels(t *testing.T) {
 			cfg := &Config{
 				LogLevel:  tt.logLevel,
 				LogFormat: "text",
+				Stdout:    true,
 			}
 
-			logger := SetupLogger(cfg)
+			logger, err := SetupLogger(cfg)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
 
 			if logger == nil {
 				t.Fatal("Expected non-nil logger")
@@ -66,9 +70,13 @@ func TestSetupLogger_LogFormats(t *testing.T) {
 			cfg := &Config{
 				LogLevel:  "info",
 				LogFormat: tt.logFormat,
+				Stdout:    true,
 			}
 
-			logger := SetupLogger(cfg)
+			logger, err := SetupLogger(cfg)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
 
 			if logger == nil {
 				t.Fatal("Expected non-nil logger")
@@ -81,15 +89,10 @@ func TestSetupLogger_LogFormats(t *testing.T) {
 }
 
 func TestSetupLogger_NilConfig(t *testing.T) {
-	// This test verifies what happens if someone passes a nil config
-	// The function should panic or handle it gracefully
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("Expected panic when config is nil")
-		}
-	}()
-
-	SetupLogger(nil)
+	_, err := SetupLogger(nil)
+	if err == nil {
+		t.Error("Expected error when config is nil")
+	}
 }
 
 func TestSetupLogger_OutputsToStdout(t *testing.T) {
@@ -97,6 +100,7 @@ func TestSetupLogger_OutputsToStdout(t *testing.T) {
 	cfg := &Config{
 		LogLevel:  "info",
 		LogFormat: "text",
+		Stdout:    true,
 	}
 
 	// Temporarily redirect stdout to capture output
@@ -104,7 +108,10 @@ func TestSetupLogger_OutputsToStdout(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	logger := SetupLogger(cfg)
+	logger, err := SetupLogger(cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	logger.Info("test message for output verification")
 
 	// Restore stdout
@@ -127,6 +134,7 @@ func TestSetupLogger_JSONFormat(t *testing.T) {
 	cfg := &Config{
 		LogLevel:  "info",
 		LogFormat: "json",
+		Stdout:    true,
 	}
 
 	// Temporarily redirect stdout to capture output
@@ -134,7 +142,10 @@ func TestSetupLogger_JSONFormat(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	logger := SetupLogger(cfg)
+	logger, err := SetupLogger(cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	logger.Info("json test message", "key", "value")
 
 	// Restore stdout
@@ -162,6 +173,7 @@ func TestSetupLogger_LevelFiltering(t *testing.T) {
 	cfg := &Config{
 		LogLevel:  "warn",
 		LogFormat: "text",
+		Stdout:    true,
 	}
 
 	// Temporarily redirect stdout to capture output
@@ -169,7 +181,10 @@ func TestSetupLogger_LevelFiltering(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	logger := SetupLogger(cfg)
+	logger, err := SetupLogger(cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	// These should be filtered out (below warn level)
 	logger.Debug("debug message - should not appear")
@@ -206,9 +221,12 @@ func TestSetupLogger_LevelFiltering(t *testing.T) {
 
 func TestConfig_EmptyStruct(t *testing.T) {
 	// Test with an empty config (all zero values)
-	cfg := &Config{}
+	cfg := &Config{Stdout: true}
 
-	logger := SetupLogger(cfg)
+	logger, err := SetupLogger(cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	if logger == nil {
 		t.Fatal("Expected non-nil logger even with empty config")
@@ -223,9 +241,13 @@ func TestSetupLogger_SetsGlobalDefault(t *testing.T) {
 	cfg := &Config{
 		LogLevel:  "debug",
 		LogFormat: "text",
+		Stdout:    true,
 	}
 
-	logger := SetupLogger(cfg)
+	logger, err := SetupLogger(cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 
 	// Verify it's set as the global default
 	defaultLogger := slog.Default()
@@ -254,9 +276,13 @@ func TestSetupLogger_CaseSensitivity(t *testing.T) {
 			cfg := &Config{
 				LogLevel:  tt.logLevel,
 				LogFormat: "text",
+				Stdout:    true,
 			}
 
-			logger := SetupLogger(cfg)
+			logger, err := SetupLogger(cfg)
+			if err != nil {
+				t.Fatalf("Unexpected error: %v", err)
+			}
 
 			if logger == nil {
 				t.Fatal("Expected non-nil logger")

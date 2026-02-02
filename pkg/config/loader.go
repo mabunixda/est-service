@@ -123,6 +123,14 @@ func applyDefaults(cfg *Config) error {
 	if cfg.Observability.Logging.Format == "" {
 		cfg.Observability.Logging.Format = "json"
 	}
+	if cfg.Observability.Logging.Stdout == nil {
+		defaultStdout := true
+		cfg.Observability.Logging.Stdout = &defaultStdout
+	}
+	if cfg.Observability.Audit.Stdout == nil {
+		defaultStdout := true
+		cfg.Observability.Audit.Stdout = &defaultStdout
+	}
 
 	return nil
 }
@@ -158,6 +166,22 @@ func validate(cfg *Config) error {
 	validLogFormats := map[string]bool{"json": true, "text": true}
 	if !validLogFormats[cfg.Observability.Logging.Format] {
 		return fmt.Errorf("invalid logging format: %s", cfg.Observability.Logging.Format)
+	}
+
+	loggingStdout := true
+	if cfg.Observability.Logging.Stdout != nil {
+		loggingStdout = *cfg.Observability.Logging.Stdout
+	}
+	if !loggingStdout && cfg.Observability.Logging.File == "" {
+		return fmt.Errorf("logging requires at least one output: set observability.logging.stdout=true or observability.logging.file")
+	}
+
+	auditStdout := true
+	if cfg.Observability.Audit.Stdout != nil {
+		auditStdout = *cfg.Observability.Audit.Stdout
+	}
+	if cfg.Observability.Audit.Enabled && !auditStdout && cfg.Observability.Audit.File == "" {
+		return fmt.Errorf("audit logging requires at least one output: set observability.audit.stdout=true or observability.audit.file")
 	}
 
 	// Validate label policies

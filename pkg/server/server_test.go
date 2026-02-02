@@ -21,8 +21,50 @@ import (
 	"github.com/mabunixda/est-service/pkg/auth"
 	"github.com/mabunixda/est-service/pkg/backend"
 	"github.com/mabunixda/est-service/pkg/handlers"
+	"github.com/mabunixda/est-service/pkg/observability"
 	"github.com/openbao/openbao/api/v2"
 )
+
+func TestRequestIDMiddleware_GeneratesAndEchoes(t *testing.T) {
+	srv := &Server{}
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	w := httptest.NewRecorder()
+
+	h := srv.requestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if observability.RequestIDFromContext(r.Context()) == "" {
+			t.Error("expected request ID in context")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	h.ServeHTTP(w, req)
+
+	if got := w.Header().Get(observability.RequestIDHeader); got == "" {
+		t.Error("expected request ID header to be set")
+	}
+}
+
+func TestRequestIDMiddleware_PreservesHeader(t *testing.T) {
+	srv := &Server{}
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.Header.Set(observability.RequestIDHeader, "req-123")
+	w := httptest.NewRecorder()
+
+	h := srv.requestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := observability.RequestIDFromContext(r.Context()); got != "req-123" {
+			t.Errorf("expected request ID 'req-123', got '%s'", got)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	h.ServeHTTP(w, req)
+
+	if got := w.Header().Get(observability.RequestIDHeader); got != "req-123" {
+		t.Errorf("expected response request ID 'req-123', got '%s'", got)
+	}
+}
 
 // mockBackend implements backend.Backend for testing
 type mockBackend struct {

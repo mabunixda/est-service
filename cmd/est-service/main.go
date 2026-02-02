@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strings"
@@ -72,11 +73,22 @@ func main() {
 		os.Exit(1)
 	}
 
+	loggingStdout := true
+	if cfg.Observability.Logging.Stdout != nil {
+		loggingStdout = *cfg.Observability.Logging.Stdout
+	}
+
 	// Initialize logger
-	logger := observability.SetupLogger(&observability.Config{
+	logger, err := observability.SetupLogger(&observability.Config{
 		LogLevel:  cfg.Observability.Logging.Level,
 		LogFormat: cfg.Observability.Logging.Format,
+		Stdout:    loggingStdout,
+		File:      cfg.Observability.Logging.File,
 	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
 	logger.Info("Starting EST Service", "version", version.Version)
 
 	// Warn if in developer mode with enhanced safeguards
@@ -198,6 +210,23 @@ func main() {
 		}
 	}
 
+	auditStdout := true
+	if cfg.Observability.Audit.Stdout != nil {
+		auditStdout = *cfg.Observability.Audit.Stdout
+	}
+	var auditLogger *slog.Logger
+	if cfg.Observability.Audit.Enabled {
+		auditLogger, err = observability.SetupAuditLogger(&observability.AuditConfig{
+			Enabled: cfg.Observability.Audit.Enabled,
+			Stdout:  auditStdout,
+			File:    cfg.Observability.Audit.File,
+		})
+		if err != nil {
+			logger.Error("Failed to initialize audit logger", "error", err)
+			os.Exit(1)
+		}
+	}
+
 	// Create and start server
 	srvCfg := &server.Config{
 		ListenAddr:       cfg.Server.ListenAddress,
@@ -213,6 +242,8 @@ func main() {
 			}
 			return *cfg.Server.InternalEndpointsAuth
 		}(),
+		AuditEnabled: cfg.Observability.Audit.Enabled,
+		AuditLogger:  auditLogger,
 	}
 
 	// Configure telemetry (OpenTelemetry)

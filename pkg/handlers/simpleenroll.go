@@ -11,6 +11,7 @@ import (
 	"github.com/mabunixda/est-service/pkg/auth"
 	"github.com/mabunixda/est-service/pkg/backend"
 	"github.com/mabunixda/est-service/pkg/est"
+	"github.com/mabunixda/est-service/pkg/observability"
 )
 
 // SimpleEnrollHandler handles POST /.well-known/est/simpleenroll
@@ -20,6 +21,7 @@ type SimpleEnrollHandler struct {
 	config    *EnrollmentConfig
 	logger    *slog.Logger
 	telemetry Telemetry // Telemetry interface for metrics
+	auditLog  *slog.Logger
 }
 
 // NewSimpleEnrollHandler creates a new simple enrollment handler
@@ -39,6 +41,11 @@ func NewSimpleEnrollHandler(backend backend.Backend, authMgr *auth.Manager, conf
 		logger:    logger,
 		telemetry: telemetry,
 	}
+}
+
+// SetAuditLogger sets the audit logger for structured audit events
+func (h *SimpleEnrollHandler) SetAuditLogger(logger *slog.Logger) {
+	h.auditLog = logger
 }
 
 // ServeHTTP handles the simple enrollment request
@@ -79,6 +86,15 @@ func (h *SimpleEnrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		if h.telemetry != nil {
 			h.telemetry.RecordAuthFailure(ctx, "unknown", authResult.Error.Error())
 		}
+		if h.auditLog != nil {
+			h.auditLog.Info("audit.enroll",
+				"request_id", observability.RequestIDFromContext(ctx),
+				"action", "enroll",
+				"result", "denied",
+				"reason", "auth_failed",
+				"remote_addr", r.RemoteAddr,
+				"user_agent", r.UserAgent())
+		}
 		h.sendAuthRequired(w)
 		return
 	}
@@ -99,12 +115,30 @@ func (h *SimpleEnrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 	if err := est.ValidateCSRSignatureAlgorithm(csr, h.config.AllowedSignatureAlgos); err != nil {
 		h.logger.Error("Disallowed CSR signature algorithm", "error", err)
+		if h.auditLog != nil {
+			h.auditLog.Info("audit.enroll",
+				"request_id", observability.RequestIDFromContext(ctx),
+				"action", "enroll",
+				"result", "denied",
+				"reason", "invalid_signature_algorithm",
+				"remote_addr", r.RemoteAddr,
+				"user_agent", r.UserAgent())
+		}
 		http.Error(w, "Invalid CSR signature algorithm", http.StatusBadRequest)
 		return
 	}
 
 	if err := est.ValidateCSRSignature(csr); err != nil {
 		h.logger.Error("Invalid CSR signature", "error", err)
+		if h.auditLog != nil {
+			h.auditLog.Info("audit.enroll",
+				"request_id", observability.RequestIDFromContext(ctx),
+				"action", "enroll",
+				"result", "denied",
+				"reason", "invalid_signature",
+				"remote_addr", r.RemoteAddr,
+				"user_agent", r.UserAgent())
+		}
 		http.Error(w, "Invalid CSR signature", http.StatusBadRequest)
 		return
 	}
@@ -125,6 +159,15 @@ func (h *SimpleEnrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		if h.telemetry != nil {
 			h.telemetry.RecordCertificateRejected(ctx, "enroll", err.Error())
 		}
+		if h.auditLog != nil {
+			h.auditLog.Info("audit.enroll",
+				"request_id", observability.RequestIDFromContext(ctx),
+				"action", "enroll",
+				"result", "error",
+				"reason", "backend_error",
+				"remote_addr", r.RemoteAddr,
+				"user_agent", r.UserAgent())
+		}
 		SendBackendError(w, err, "certificate enrollment")
 		return
 	}
@@ -140,6 +183,15 @@ func (h *SimpleEnrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			cert.Subject.String(),
 			cert.SerialNumber.String(),
 			enrollReq.Policy.TTL)
+	}
+	if h.auditLog != nil {
+		h.auditLog.Info("audit.enroll",
+			"request_id", observability.RequestIDFromContext(ctx),
+			"action", "enroll",
+			"result", "success",
+			"auth_method", authResult.Method,
+			"remote_addr", r.RemoteAddr,
+			"user_agent", r.UserAgent())
 	}
 
 	h.logger.Info("Certificate enrolled successfully",

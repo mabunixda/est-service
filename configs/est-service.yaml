@@ -90,6 +90,12 @@ observability:
   logging:
     level: "info"
     format: "json"
+    stdout: true
+    file: "" # Optional log file path
   tracing:
     enabled: false
     endpoint: ""
+  audit:
+    enabled: true
+    stdout: true
+    file: "" # Optional audit log file path

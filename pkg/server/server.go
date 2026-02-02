@@ -16,6 +16,7 @@ import (
 	"github.com/mabunixda/est-service/pkg/auth"
 	"github.com/mabunixda/est-service/pkg/backend"
 	"github.com/mabunixda/est-service/pkg/handlers"
+	"github.com/mabunixda/est-service/pkg/observability"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	httpSwagger "github.com/swaggo/http-swagger/v2"
 )
@@ -27,6 +28,7 @@ type Server struct {
 	authMgr         *auth.Manager
 	config          *Config
 	logger          *slog.Logger
+	auditLogger     *slog.Logger
 	telemetry       *Telemetry
 	rateLimiter     *RateLimiter // General rate limiter for all endpoints
 	authRateLimiter *RateLimiter // Stricter rate limiter for auth endpoints
@@ -39,6 +41,8 @@ type Config struct {
 	RateLimit             *RateLimitConfig
 	Telemetry             *TelemetryConfig
 	InternalEndpointsAuth bool
+	AuditEnabled          bool
+	AuditLogger           *slog.Logger
 	ReadTimeout           time.Duration
 	WriteTimeout          time.Duration
 	IdleTimeout           time.Duration
@@ -143,9 +147,20 @@ func New(backend *backend.Client, cfg *Config, logger *slog.Logger) (*Server, er
 		authMgr:         authMgr,
 		config:          cfg,
 		logger:          logger,
+		auditLogger:     nil,
 		telemetry:       telemetry,
 		rateLimiter:     rateLimiter,
 		authRateLimiter: authRateLimiter,
+	}
+
+	if cfg.AuditLogger != nil {
+		s.auditLogger = cfg.AuditLogger
+	} else if cfg.AuditEnabled {
+		auditLogger, err := observability.SetupAuditLogger(&observability.AuditConfig{Enabled: true, Stdout: true})
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize audit logger: %w", err)
+		}
+		s.auditLogger = auditLogger
 	}
 
 	// Setup routes
@@ -159,7 +174,10 @@ func New(backend *backend.Client, cfg *Config, logger *slog.Logger) (*Server, er
 		handler = s.rateLimiter.Middleware(handler)
 	}
 
-	// 2. Security headers (outermost - applied last, so headers are set first)
+	// 2. Request ID propagation
+	handler = s.requestIDMiddleware(handler)
+
+	// 3. Security headers (outermost - applied last, so headers are set first)
 	handler = s.securityHeadersMiddleware(handler)
 
 	// Create HTTP server
@@ -210,7 +228,10 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	}
 
 	simpleEnrollHandler := handlers.NewSimpleEnrollHandler(s.backend, s.authMgr, s.config.EnrollmentConfig, s.logger, telemetry)
+	simpleEnrollHandler.SetAuditLogger(s.auditLogger)
+
 	simpleReenrollHandler := handlers.NewSimpleReenrollHandler(s.backend, s.authMgr, s.config.EnrollmentConfig, s.logger, telemetry)
+	simpleReenrollHandler.SetAuditLogger(s.auditLogger)
 
 	// Apply auth rate limiting to enrollment endpoints if configured
 	var enrollHandler, reenrollHandler http.Handler = simpleEnrollHandler, simpleReenrollHandler
@@ -499,11 +520,29 @@ func (s *Server) loggingMiddleware(next http.Handler) http.Handler {
 		s.logger.Info("HTTP request",
 			"method", r.Method,
 			"path", r.URL.Path,
+			"request_id", observability.RequestIDFromContext(r.Context()),
 			"remote_addr", r.RemoteAddr,
 			"user_agent", r.UserAgent(),
 			"status", rw.statusCode,
 			"duration_ms", time.Since(start).Milliseconds(),
 		)
+	})
+}
+
+// requestIDMiddleware ensures every request has a request ID
+func (s *Server) requestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqID := r.Header.Get(observability.RequestIDHeader)
+		if len(reqID) == 0 || len(reqID) > 128 {
+			reqID = observability.NewRequestID()
+		}
+		if reqID == "" {
+			reqID = "unknown"
+		}
+		ctx := observability.WithRequestID(r.Context(), reqID)
+		r = r.WithContext(ctx)
+		w.Header().Set(observability.RequestIDHeader, reqID)
+		next.ServeHTTP(w, r)
 	})
 }
 

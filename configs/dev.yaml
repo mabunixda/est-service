@@ -56,5 +56,11 @@ observability:
   logging:
     level: "debug"
     format: "text"
+    stdout: true
+    file: "" # Optional log file path
   tracing:
     enabled: false
+  audit:
+    enabled: false
+    stdout: true
+    file: "" # Optional audit log file path

@@ -11,6 +11,7 @@ import (
 	"github.com/mabunixda/est-service/pkg/auth"
 	"github.com/mabunixda/est-service/pkg/backend"
 	"github.com/mabunixda/est-service/pkg/est"
+	"github.com/mabunixda/est-service/pkg/observability"
 )
 
 // SimpleReenrollHandler handles POST /.well-known/est/simplereenroll
@@ -20,6 +21,7 @@ type SimpleReenrollHandler struct {
 	config    *EnrollmentConfig
 	logger    *slog.Logger
 	telemetry Telemetry
+	auditLog  *slog.Logger
 }
 
 // NewSimpleReenrollHandler creates a new simple reenrollment handler
@@ -39,6 +41,11 @@ func NewSimpleReenrollHandler(backend backend.Backend, authMgr *auth.Manager, co
 		logger:    logger,
 		telemetry: telemetry,
 	}
+}
+
+// SetAuditLogger sets the audit logger for structured audit events
+func (h *SimpleReenrollHandler) SetAuditLogger(logger *slog.Logger) {
+	h.auditLog = logger
 }
 
 // ServeHTTP handles the simple reenrollment request
@@ -75,6 +82,15 @@ func (h *SimpleReenrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		if h.telemetry != nil {
 			h.telemetry.RecordAuthFailure(ctx, authResult.Method, authResult.Error.Error())
 		}
+		if h.auditLog != nil {
+			h.auditLog.Info("audit.reenroll",
+				"request_id", observability.RequestIDFromContext(ctx),
+				"action", "reenroll",
+				"result", "denied",
+				"reason", "auth_failed",
+				"remote_addr", r.RemoteAddr,
+				"user_agent", r.UserAgent())
+		}
 		h.sendAuthRequired(w)
 		return
 	}
@@ -106,6 +122,15 @@ func (h *SimpleReenrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		if h.telemetry != nil {
 			h.telemetry.RecordCertificateRejected(ctx, "reenroll", "invalid_signature_algorithm")
 		}
+		if h.auditLog != nil {
+			h.auditLog.Info("audit.reenroll",
+				"request_id", observability.RequestIDFromContext(ctx),
+				"action", "reenroll",
+				"result", "denied",
+				"reason", "invalid_signature_algorithm",
+				"remote_addr", r.RemoteAddr,
+				"user_agent", r.UserAgent())
+		}
 		http.Error(w, "Invalid CSR signature algorithm", http.StatusBadRequest)
 		return
 	}
@@ -114,6 +139,15 @@ func (h *SimpleReenrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		h.logger.Error("Invalid CSR signature", "error", err)
 		if h.telemetry != nil {
 			h.telemetry.RecordCertificateRejected(ctx, "reenroll", "invalid_signature")
+		}
+		if h.auditLog != nil {
+			h.auditLog.Info("audit.reenroll",
+				"request_id", observability.RequestIDFromContext(ctx),
+				"action", "reenroll",
+				"result", "denied",
+				"reason", "invalid_signature",
+				"remote_addr", r.RemoteAddr,
+				"user_agent", r.UserAgent())
 		}
 		http.Error(w, "Invalid CSR signature", http.StatusBadRequest)
 		return
@@ -128,6 +162,15 @@ func (h *SimpleReenrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 				"cert_subject", clientCert.Subject.String())
 			if h.telemetry != nil {
 				h.telemetry.RecordCertificateRejected(ctx, "reenroll", "csr_cert_mismatch")
+			}
+			if h.auditLog != nil {
+				h.auditLog.Info("audit.reenroll",
+					"request_id", observability.RequestIDFromContext(ctx),
+					"action", "reenroll",
+					"result", "denied",
+					"reason", "csr_cert_mismatch",
+					"remote_addr", r.RemoteAddr,
+					"user_agent", r.UserAgent())
 			}
 			http.Error(w, "CSR public key must match client certificate", http.StatusBadRequest)
 			return
@@ -153,6 +196,15 @@ func (h *SimpleReenrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		if h.telemetry != nil {
 			h.telemetry.RecordCertificateRejected(ctx, "reenroll", "backend_error")
 		}
+		if h.auditLog != nil {
+			h.auditLog.Info("audit.reenroll",
+				"request_id", observability.RequestIDFromContext(ctx),
+				"action", "reenroll",
+				"result", "error",
+				"reason", "backend_error",
+				"remote_addr", r.RemoteAddr,
+				"user_agent", r.UserAgent())
+		}
 		SendBackendError(w, err, "certificate re-enrollment")
 		return
 	}
@@ -168,6 +220,15 @@ func (h *SimpleReenrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			cert.Subject.String(),
 			cert.SerialNumber.String(),
 			enrollReq.Policy.TTL)
+	}
+	if h.auditLog != nil {
+		h.auditLog.Info("audit.reenroll",
+			"request_id", observability.RequestIDFromContext(ctx),
+			"action", "reenroll",
+			"result", "success",
+			"auth_method", authResult.Method,
+			"remote_addr", r.RemoteAddr,
+			"user_agent", r.UserAgent())
 	}
 
 	// Log successful reenrollment with optional old serial
