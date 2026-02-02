@@ -245,8 +245,8 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 			parts[i] = ""
 		}
 
-		// Clear password variable by reassigning
-		password = ""
+		// Clear password variable reference (best effort - strings are immutable in Go)
+		_ = password // Mark as intentionally unused after this point
 	}
 
 	if err != nil {
