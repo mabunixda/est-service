@@ -205,9 +205,7 @@ func New(backend *backend.Client, cfg *Config, logger *slog.Logger) (*Server, er
 	// Check certificate expiry at startup (after httpServer is assigned)
 	if cfg.TLSConfig != nil && cfg.TLSConfig.CertFile != "" && cfg.TLSConfig.KeyFile != "" {
 		if err := s.checkCertificateExpiry(context.Background()); err != nil {
-			// Log error but don't fail startup - the cert might be expired but we still need to start
-			// This allows for cert renewal operations while the service is running
-			s.logger.Error("Certificate expiry check failed", "error", err)
+			return nil, fmt.Errorf("certificate expiry check failed: %w", err)
 		}
 	}
 
@@ -431,6 +429,33 @@ func (s *Server) Start(ctx context.Context) error {
 			}
 		}
 	}()
+
+	// Monitor certificate expiry (shut down when expired)
+	if s.config.TLSConfig != nil && s.config.TLSConfig.CertFile != "" && s.config.TLSConfig.KeyFile != "" {
+		go func() {
+			ticker := time.NewTicker(1 * time.Hour)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := s.checkCertificateExpiry(context.Background()); err != nil {
+						s.logger.Error("Certificate expired - shutting down server", "error", err)
+						shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						_ = s.Shutdown(shutdownCtx)
+						cancel()
+						select {
+						case errChan <- fmt.Errorf("server certificate expired: %w", err):
+						default:
+						}
+						return
+					}
+				}
+			}
+		}()
+	}
 
 	// Wait for context cancellation or error
 	select {

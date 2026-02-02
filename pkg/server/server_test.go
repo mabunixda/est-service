@@ -765,6 +765,31 @@ func TestCheckCertificateExpiry_ExpiredCert(t *testing.T) {
 	certFile, keyFile, cleanup := createTestCertFilesWithExpiry(t, -24*time.Hour) // Expired 1 day ago
 	defer cleanup()
 
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		t.Fatalf("Failed to load test certificate: %v", err)
+	}
+
+	srv := &Server{
+		logger: slog.Default(),
+		httpServer: &http.Server{
+			TLSConfig: &tls.Config{
+				Certificates: []tls.Certificate{cert},
+			},
+		},
+	}
+
+	// Check certificate expiry - should return error
+	err = srv.checkCertificateExpiry(context.Background())
+	if err == nil {
+		t.Error("Expected error for expired cert, got nil")
+	}
+}
+
+func TestNew_ExpiredCertFails(t *testing.T) {
+	certFile, keyFile, cleanup := createTestCertFilesWithExpiry(t, -24*time.Hour) // Expired 1 day ago
+	defer cleanup()
+
 	backendClient := &backend.Client{}
 	cfg := &Config{
 		ListenAddr: "localhost:0",
@@ -777,15 +802,9 @@ func TestCheckCertificateExpiry_ExpiredCert(t *testing.T) {
 		EnrollmentConfig: &handlers.EnrollmentConfig{},
 	}
 
-	srv, err := New(backendClient, cfg, slog.Default())
-	if err != nil {
-		t.Fatalf("Failed to create server: %v", err)
-	}
-
-	// Check certificate expiry - should return error
-	err = srv.checkCertificateExpiry(context.Background())
+	_, err := New(backendClient, cfg, slog.Default())
 	if err == nil {
-		t.Error("Expected error for expired cert, got nil")
+		t.Fatal("Expected error for expired cert in production, got nil")
 	}
 }
 
