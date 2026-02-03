@@ -58,13 +58,9 @@ log_info "Fetching CA certificates..."
 if curl -ks -o cacerts.b64 "$EST_BASE_URL/cacerts"; then
     log_success "CA certificates retrieved"
     
-    # Decode base64 and save as DER (handle macOS base64)
-    if base64 --version 2>&1 | grep -q "GNU"; then
-        base64 -d cacerts.b64 > cacerts.p7
-    else
-        # macOS base64
-        base64 -D -i cacerts.b64 -o cacerts.p7
-    fi
+    # Decode base64 and save as DER
+    log_info "Decoding base64..."
+    base64_decode cacerts.b64 cacerts.p7
     
     # Extract certificates from PKCS#7
     log_info "Extracting certificates from PKCS#7..."

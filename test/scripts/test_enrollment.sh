@@ -32,7 +32,7 @@ else
 fi
 
 log_info "Decoding CA certificates..."
-base64 -D -i cacerts.b64 -o cacerts.p7
+base64_decode cacerts.b64 cacerts.p7
 if openssl pkcs7 -inform DER -in cacerts.p7 -print_certs -out cacerts.pem 2>/dev/null; then
     log_success "✓ CA certificates decoded successfully"
     openssl x509 -in cacerts.pem -text -noout | grep -E "(Subject:|Issuer:)"
@@ -73,7 +73,7 @@ else
 fi
 
 log_info "Decoding enrolled certificate..."
-base64 -D -i cert.b64 -o cert.p7
+base64_decode cert.b64 cert.p7
 if openssl pkcs7 -inform DER -in cert.p7 -print_certs -out device.pem 2>/dev/null; then
     log_success "✓ Certificate decoded successfully"
     openssl x509 -in device.pem -text -noout | grep -E "(Subject:|Serial Number:|Not Before|Not After)"
@@ -132,7 +132,7 @@ else
 fi
 
 log_info "Decoding re-enrolled certificate..."
-base64 -D -i reenrolled-cert.b64 -o reenrolled-cert.p7
+base64_decode reenrolled-cert.b64 reenrolled-cert.p7
 if openssl pkcs7 -inform DER -in reenrolled-cert.p7 -print_certs -out reenrolled-cert.pem 2>/dev/null; then
     log_success "✓ Re-enrolled certificate decoded successfully"
     openssl x509 -in reenrolled-cert.pem -text -noout | grep -E "(Subject:|Serial Number:|Not Before|Not After)"

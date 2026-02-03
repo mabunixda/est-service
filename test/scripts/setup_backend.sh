@@ -285,15 +285,30 @@ if [ "$ENABLE_CERT_AUTH" = "true" ]; then
     
     # Verify each CA certificate is valid
     log_info "Validating CA certificates in bundle..."
-    csplit -s -f "$TEST_DIR/ca-split-" "$TEST_DIR/client-ca-bundle.pem" '/-----BEGIN CERTIFICATE-----/' '{*}'
-    for cert_file in "$TEST_DIR/ca-split-"*; do
-        if [ -s "$cert_file" ] && grep -q "BEGIN CERTIFICATE" "$cert_file"; then
-            if openssl x509 -in "$cert_file" -noout -subject 2>/dev/null; then
-                log_info "  ✓ Valid CA: $(openssl x509 -in "$cert_file" -noout -subject | sed 's/subject=//')"
+    
+    # Split bundle into individual certificates using portable shell approach
+    CERT_NUM=0
+    CURRENT_CERT=""
+    while IFS= read -r line; do
+        if [[ "$line" == "-----BEGIN CERTIFICATE-----" ]]; then
+            CURRENT_CERT="$line"
+        elif [[ "$line" == "-----END CERTIFICATE-----" ]]; then
+            CURRENT_CERT="$CURRENT_CERT"$'\n'"$line"
+            CERT_FILE="/tmp/ca-split-$$.${CERT_NUM}.pem"
+            echo "$CURRENT_CERT" > "$CERT_FILE"
+            
+            if openssl x509 -in "$CERT_FILE" -noout -subject 2>/dev/null; then
+                log_info "  ✓ Valid CA: $(openssl x509 -in "$CERT_FILE" -noout -subject | sed 's/subject=//')"
             fi
+            rm -f "$CERT_FILE"
+            
+            CERT_NUM=$((CERT_NUM + 1))
+            CURRENT_CERT=""
+        elif [ -n "$CURRENT_CERT" ]; then
+            CURRENT_CERT="$CURRENT_CERT"$'\n'"$line"
         fi
-        rm -f "$cert_file"
-    done
+    done < "$TEST_DIR/client-ca-bundle.pem"
+    
     log_success "All CA certificates validated"
 fi
 

@@ -86,6 +86,36 @@ check_command() {
     fi
 }
 
+# Portable base64 decode function
+# Usage: base64_decode input_file output_file
+base64_decode() {
+    local input_file="$1"
+    local output_file="$2"
+    
+    # Try macOS style first (-D flag)
+    if base64 -D -i "$input_file" -o "$output_file" 2>/dev/null; then
+        return 0
+    fi
+    
+    # Try Linux style (-d flag)
+    if base64 -d -i "$input_file" -o "$output_file" 2>/dev/null; then
+        return 0
+    fi
+    
+    # Fallback: Try without -i and -o flags (older base64 versions)
+    if base64 -d < "$input_file" > "$output_file" 2>/dev/null; then
+        return 0
+    fi
+    
+    # Last resort: macOS without -i/-o
+    if base64 -D < "$input_file" > "$output_file" 2>/dev/null; then
+        return 0
+    fi
+    
+    log_error "Failed to decode base64 file: $input_file"
+    return 1
+}
+
 # Detect which backend CLI to use
 if [ "$BACKEND_TYPE" = "vault" ]; then
     BAO_CMD="vault"

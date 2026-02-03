@@ -59,7 +59,7 @@ else
 fi
 
 log_info "Decoding CA certificates..."
-base64 -D -i cacerts.b64 -o cacerts.p7
+base64_decode cacerts.b64 cacerts.p7
 if openssl pkcs7 -inform DER -in cacerts.p7 -print_certs -out cacerts.pem 2>/dev/null; then
     log_success "✓ CA certificates decoded successfully"
     openssl x509 -in cacerts.pem -text -noout | grep -E "(Subject:|Issuer:)"
@@ -129,7 +129,7 @@ else
 fi
 
 log_info "Decoding enrolled certificate..."
-base64 -D -i cert.b64 -o cert.p7
+base64_decode cert.b64 cert.p7
 if openssl pkcs7 -inform DER -in cert.p7 -print_certs -out device.pem 2>/dev/null; then
     log_success "✓ Certificate decoded successfully"
     openssl x509 -in device.pem -text -noout | grep -E "(Subject:|Serial Number:|Not Before|Not After)"
@@ -193,21 +193,81 @@ fi
 
 log_success "✓ Combined CA bundle validated ($BUNDLE_CERT_COUNT CA certificates)"
 log_info "Bundle contents:"
-csplit -s -f "$TEST_DIR/.ca-check-" "$TEST_DIR/client-ca-bundle.pem" '/-----BEGIN CERTIFICATE-----/' '{*}'
-for cert_file in "$TEST_DIR/.ca-check-"*; do
-    if [ -s "$cert_file" ] && grep -q "BEGIN CERTIFICATE" "$cert_file"; then
-        SUBJECT=$(openssl x509 -in "$cert_file" -noout -subject 2>/dev/null | sed 's/subject=//')
-        log_info "  - $SUBJECT"
+
+# Split bundle into individual certificates and display subjects
+# Using a portable approach that works on both Linux and macOS
+CERT_NUM=0
+CURRENT_CERT=""
+while IFS= read -r line; do
+    if [[ "$line" == "-----BEGIN CERTIFICATE-----" ]]; then
+        CURRENT_CERT="$line"
+    elif [[ "$line" == "-----END CERTIFICATE-----" ]]; then
+        CURRENT_CERT="$CURRENT_CERT"$'\n'"$line"
+        CERT_FILE="/tmp/ca-check-$$.${CERT_NUM}.pem"
+        echo "$CURRENT_CERT" > "$CERT_FILE"
+        
+        SUBJECT=$(openssl x509 -in "$CERT_FILE" -noout -subject 2>/dev/null | sed 's/subject=//' || echo "")
+        if [ -n "$SUBJECT" ]; then
+            log_info "  - $SUBJECT"
+        fi
+        rm -f "$CERT_FILE"
+        
+        CERT_NUM=$((CERT_NUM + 1))
+        CURRENT_CERT=""
+    elif [ -n "$CURRENT_CERT" ]; then
+        CURRENT_CERT="$CURRENT_CERT"$'\n'"$line"
     fi
-    rm -f "$cert_file"
-done
+done < "$TEST_DIR/client-ca-bundle.pem"
 
 # Generate CSR for re-enrollment
 log_info "Generating renewal CSR with same subject as enrolled cert..."
-openssl req -new -key device.key -out device-renew.csr \
-    -subj "/CN=device-cert-auth.example.com/O=Certificate Auth Test/C=US" 2>/dev/null
+
+# Extract the actual subject from the enrolled certificate
+# This ensures we match what the PKI backend actually issued
+CERT_SUBJECT=$(openssl x509 -in device.pem -noout -subject | sed 's/subject=//')
+log_info "Using certificate subject: $CERT_SUBJECT"
+
+# Convert subject to openssl req format (e.g., "CN=foo, O=bar" -> "/CN=foo/O=bar")
+CSR_SUBJECT=$(echo "$CERT_SUBJECT" | sed 's/, /\//g' | sed 's/^/\//')
+log_info "CSR subject format: $CSR_SUBJECT"
+
+# Check if certificate has SANs
+CERT_SANS=$(openssl x509 -in device.pem -noout -ext subjectAltName 2>/dev/null | grep -v "X509v3 Subject Alternative Name:" | tr -d ' ' || echo "")
+if [ -n "$CERT_SANS" ]; then
+    log_info "Certificate has SANs: $CERT_SANS"
+    
+    # Create a config file for the CSR with SANs
+    cat > device-renew.conf << EOF
+[req]
+distinguished_name = req_distinguished_name
+req_extensions = v3_req
+
+[req_distinguished_name]
+
+[v3_req]
+subjectAltName = $CERT_SANS
+EOF
+    
+    openssl req -new -key device.key -out device-renew.csr \
+        -subj "$CSR_SUBJECT" \
+        -config device-renew.conf 2>/dev/null
+else
+    log_info "Certificate has no SANs"
+    openssl req -new -key device.key -out device-renew.csr \
+        -subj "$CSR_SUBJECT" 2>/dev/null
+fi
+
 openssl req -in device-renew.csr -outform DER -out device-renew.csr.der
 log_success "✓ Renewal CSR generated"
+
+# Verify the CSR matches the certificate
+log_info "Verifying CSR matches certificate..."
+CSR_SUBJECT_CHECK=$(openssl req -in device-renew.csr -noout -subject)
+log_info "CSR Subject: $CSR_SUBJECT_CHECK"
+if [ -n "$CERT_SANS" ]; then
+    CSR_SANS=$(openssl req -in device-renew.csr -noout -text | grep -A 1 "Subject Alternative Name" | tail -1 | tr -d ' ' || echo "")
+    log_info "CSR SANs: $CSR_SANS"
+fi
 
 # Step 6: Re-enrollment using enrolled device certificate as client cert
 log_section "Step 6: Re-enrollment Using Enrolled Certificate (RFC 7030 §4.2.2)"
@@ -230,7 +290,7 @@ if [ "$HTTP_CODE" = "200" ]; then
     log_success "✓ Certificate re-enrolled with device cert as client cert (HTTP $HTTP_CODE)"
     
     log_info "Decoding re-enrolled certificate..."
-    base64 -D -i reenrolled-cert.b64 -o reenrolled-cert.p7
+    base64_decode reenrolled-cert.b64 reenrolled-cert.p7
     if openssl pkcs7 -inform DER -in reenrolled-cert.p7 -print_certs -out reenrolled.pem 2>/dev/null; then
         log_success "✓ Re-enrolled certificate decoded successfully"
         openssl x509 -in reenrolled.pem -text -noout | grep -E "(Subject:|Serial Number:|Not Before|Not After)"
