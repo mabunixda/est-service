@@ -57,8 +57,8 @@ jobs:
       - name: golangci-lint
         run: make lint
 
-  build:
-    name: Build
+  build-binary:
+    name: Build Binary
     runs-on: ubuntu-latest
 
     steps:
@@ -71,15 +71,33 @@ jobs:
       - name: Build binary
         run: make build
 
-      - name: Build Docker image
-        run: docker build -f deployments/docker/Dockerfile -t est-service:test .
-
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
           name: est-service-binary
           path: bin/est-service
           retention-days: 7
+
+  build-container:
+    name: Build Container
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployments/docker/Dockerfile
+          push: false
+          tags: est-service:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   # integration-test:
   #   name: Integration Tests
