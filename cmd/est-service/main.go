@@ -246,8 +246,10 @@ func main() {
 			}
 			return *cfg.Server.InternalEndpointsAuth
 		}(),
-		AuditEnabled: cfg.Observability.Audit.Enabled,
-		AuditLogger:  auditLogger,
+		AuditEnabled:    cfg.Observability.Audit.Enabled,
+		AuditLogger:     auditLogger,
+		CSRAttrsEnabled: cfg.EST.CSRAttributes.Enabled,
+		CSRAttrsOIDs:    cfg.EST.CSRAttributes.Attributes,
 	}
 
 	// Configure telemetry (OpenTelemetry)

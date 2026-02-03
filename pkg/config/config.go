@@ -69,6 +69,7 @@ type ESTConfig struct {
 	DefaultPolicy  PolicyConfig           `yaml:"default_policy"`
 	Authenticators AuthenticatorsConfig   `yaml:"authenticators"`
 	CSRValidation  CSRValidationConfig    `yaml:"csr_validation"`
+	CSRAttributes  CSRAttributesConfig    `yaml:"csr_attributes"` // RFC 7030 Section 4.5 - /csrattrs endpoint
 }
 
 // LabelConfig configures a specific EST label
@@ -131,6 +132,12 @@ type TokenAuthConfig struct {
 type CSRValidationConfig struct {
 	MaxSizeBytes               int      `yaml:"max_size_bytes"`
 	AllowedSignatureAlgorithms []string `yaml:"allowed_signature_algorithms"`
+}
+
+// CSRAttributesConfig configures the /csrattrs endpoint (RFC 7030 Section 4.5)
+type CSRAttributesConfig struct {
+	Enabled    bool     `yaml:"enabled"`    // Enable /csrattrs endpoint
+	Attributes []string `yaml:"attributes"` // OIDs to return (e.g., "1.2.840.113549.1.9.14")
 }
 
 // ObservabilityConfig configures monitoring and logging

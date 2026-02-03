@@ -52,6 +52,8 @@ type Config struct {
 	PKIMount         string
 	AuthConfig       *auth.Config
 	EnrollmentConfig *handlers.EnrollmentConfig
+	CSRAttrsEnabled  bool
+	CSRAttrsOIDs     []string
 }
 
 // TLSConfig holds TLS configuration
@@ -256,6 +258,12 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// Create handlers
 	caCertsHandler := handlers.NewCACertsHandler(s.backend, s.config.PKIMount, s.logger)
 
+	// CSR Attributes handler (RFC 7030 Section 4.5 - optional endpoint)
+	var csrAttrsHandler http.Handler
+	if s.config.CSRAttrsEnabled {
+		csrAttrsHandler = handlers.NewCSRAttrsHandler(s.logger, s.config.CSRAttrsOIDs)
+	}
+
 	// Get telemetry interface or use no-op
 	var telemetry handlers.Telemetry = &handlers.NoOpTelemetry{}
 	if s.telemetry != nil {
@@ -279,6 +287,11 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	mux.Handle("/.well-known/est/cacerts", s.loggingMiddleware(s.recoveryMiddleware(caCertsHandler)))
 	mux.Handle("/.well-known/est/simpleenroll", s.loggingMiddleware(s.recoveryMiddleware(enrollHandler)))
 	mux.Handle("/.well-known/est/simplereenroll", s.loggingMiddleware(s.recoveryMiddleware(reenrollHandler)))
+
+	// Optional EST endpoint: CSR Attributes (RFC 7030 Section 4.5)
+	if csrAttrsHandler != nil {
+		mux.Handle("/.well-known/est/csrattrs", s.loggingMiddleware(s.recoveryMiddleware(csrAttrsHandler)))
+	}
 
 	// Health check
 	mux.HandleFunc("/health", s.healthHandler)
