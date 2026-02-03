@@ -250,6 +250,16 @@ func main() {
 		AuditLogger:     auditLogger,
 		CSRAttrsEnabled: cfg.EST.CSRAttributes.Enabled,
 		CSRAttrsOIDs:    cfg.EST.CSRAttributes.Attributes,
+
+		// RFC 7030 Section 4.4 - Server-side key generation
+		ServerKeyGenEnabled:      cfg.EST.ServerKeyGen.Enabled,
+		ServerKeyGenKeyType:      cfg.EST.ServerKeyGen.DefaultKeyType,
+		ServerKeyGenKeySize:      cfg.EST.ServerKeyGen.DefaultKeySize,
+		ServerKeyGenAllowedTypes: cfg.EST.ServerKeyGen.AllowedKeyTypes,
+		ServerKeyGenAllowedSizes: cfg.EST.ServerKeyGen.AllowedKeySizes,
+		ServerKeyGenMaxCSRSize:   cfg.EST.ServerKeyGen.MaxCSRSize,
+		ServerKeyGenUseAuthToken: cfg.EST.ServerKeyGen.UseAuthToken,
+		ServerKeyGenEncryptKey:   cfg.EST.ServerKeyGen.EncryptPrivateKey,
 	}
 
 	// Configure telemetry (OpenTelemetry)

@@ -54,6 +54,16 @@ type Config struct {
 	EnrollmentConfig *handlers.EnrollmentConfig
 	CSRAttrsEnabled  bool
 	CSRAttrsOIDs     []string
+
+	// RFC 7030 Section 4.4 - Server-side key generation
+	ServerKeyGenEnabled      bool
+	ServerKeyGenKeyType      string
+	ServerKeyGenKeySize      int
+	ServerKeyGenAllowedTypes []string
+	ServerKeyGenAllowedSizes []int
+	ServerKeyGenMaxCSRSize   int
+	ServerKeyGenUseAuthToken *bool // Pointer to detect if explicitly set (nil = default to true)
+	ServerKeyGenEncryptKey   bool
 }
 
 // TLSConfig holds TLS configuration
@@ -270,6 +280,47 @@ func (s *Server) setupRoutes() *http.ServeMux {
 		telemetry = s.telemetry
 	}
 
+	// Server-side key generation handler (RFC 7030 Section 4.4 - optional endpoint)
+	var serverKeyGenHandler http.Handler
+	if s.config.ServerKeyGenEnabled {
+		// Determine UseAuthToken with secure default
+		useAuthToken := true // Default to true for security
+		if s.config.ServerKeyGenUseAuthToken != nil {
+			useAuthToken = *s.config.ServerKeyGenUseAuthToken
+		}
+
+		serverKeyGenCfg := &handlers.ServerKeyGenConfig{
+			Enabled:           s.config.ServerKeyGenEnabled,
+			DefaultKeyType:    s.config.ServerKeyGenKeyType,
+			DefaultKeySize:    s.config.ServerKeyGenKeySize,
+			DefaultMount:      s.config.PKIMount,
+			Labels:            s.config.EnrollmentConfig.Labels,
+			DefaultPolicy:     s.config.EnrollmentConfig.DefaultPolicy,
+			MaxCSRSize:        int64(s.config.ServerKeyGenMaxCSRSize),
+			AllowedKeyTypes:   s.config.ServerKeyGenAllowedTypes,
+			AllowedKeySizes:   s.config.ServerKeyGenAllowedSizes,
+			UseAuthToken:      useAuthToken,
+			EncryptPrivateKey: s.config.ServerKeyGenEncryptKey,
+		}
+
+		// Set defaults if not configured
+		if serverKeyGenCfg.DefaultKeyType == "" {
+			serverKeyGenCfg.DefaultKeyType = "rsa"
+		}
+		if serverKeyGenCfg.DefaultKeySize == 0 {
+			serverKeyGenCfg.DefaultKeySize = 2048
+		}
+		if serverKeyGenCfg.MaxCSRSize == 0 {
+			serverKeyGenCfg.MaxCSRSize = 4096
+		}
+
+		serverKeyGenHandler = handlers.NewServerKeyGenHandler(s.backend, s.authMgr, serverKeyGenCfg, s.logger, telemetry)
+
+		if s.config.ServerKeyGenUseAuthToken == nil {
+			s.logger.Info("ServerKeyGen: using authenticated tokens (secure default)")
+		}
+	}
+
 	simpleEnrollHandler := handlers.NewSimpleEnrollHandler(s.backend, s.authMgr, s.config.EnrollmentConfig, s.logger, telemetry)
 	simpleEnrollHandler.SetAuditLogger(s.auditLogger)
 
@@ -291,6 +342,16 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// Optional EST endpoint: CSR Attributes (RFC 7030 Section 4.5)
 	if csrAttrsHandler != nil {
 		mux.Handle("/.well-known/est/csrattrs", s.loggingMiddleware(s.recoveryMiddleware(csrAttrsHandler)))
+	}
+
+	// Optional EST endpoint: Server-side key generation (RFC 7030 Section 4.4)
+	if serverKeyGenHandler != nil {
+		// Apply auth rate limiting to serverkeygen endpoint since it requires authentication
+		skg := serverKeyGenHandler
+		if s.authRateLimiter != nil {
+			skg = s.authRateLimiter.Middleware(skg)
+		}
+		mux.Handle("/.well-known/est/serverkeygen", s.loggingMiddleware(s.recoveryMiddleware(skg)))
 	}
 
 	// Health check

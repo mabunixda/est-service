@@ -70,6 +70,7 @@ type ESTConfig struct {
 	Authenticators AuthenticatorsConfig   `yaml:"authenticators"`
 	CSRValidation  CSRValidationConfig    `yaml:"csr_validation"`
 	CSRAttributes  CSRAttributesConfig    `yaml:"csr_attributes"` // RFC 7030 Section 4.5 - /csrattrs endpoint
+	ServerKeyGen   ServerKeyGenConfig     `yaml:"server_key_gen"` // RFC 7030 Section 4.4 - /serverkeygen endpoint
 }
 
 // LabelConfig configures a specific EST label
@@ -138,6 +139,21 @@ type CSRValidationConfig struct {
 type CSRAttributesConfig struct {
 	Enabled    bool     `yaml:"enabled"`    // Enable /csrattrs endpoint
 	Attributes []string `yaml:"attributes"` // OIDs to return (e.g., "1.2.840.113549.1.9.14")
+}
+
+// ServerKeyGenConfig configures the /serverkeygen endpoint (RFC 7030 Section 4.4)
+// Server-side key generation allows the server to generate the key pair and
+// return both the certificate and encrypted private key to the client.
+// WARNING: This transmits private keys over the network - ensure strong TLS is configured!
+type ServerKeyGenConfig struct {
+	Enabled           bool     `yaml:"enabled"`             // Enable /serverkeygen endpoint
+	DefaultKeyType    string   `yaml:"default_key_type"`    // "rsa" or "ecdsa" (default: "rsa")
+	DefaultKeySize    int      `yaml:"default_key_size"`    // RSA: 2048, 3072, 4096; ECDSA: 256, 384, 521 (default: 2048 for RSA)
+	AllowedKeyTypes   []string `yaml:"allowed_key_types"`   // Restrict key types (empty = all allowed)
+	AllowedKeySizes   []int    `yaml:"allowed_key_sizes"`   // Restrict key sizes (empty = all allowed)
+	MaxCSRSize        int      `yaml:"max_csr_size"`        // Maximum CSR size in bytes (default: 4096)
+	UseAuthToken      *bool    `yaml:"use_auth_token"`      // Use authenticated token for PKI operations (default: true if not specified)
+	EncryptPrivateKey bool     `yaml:"encrypt_private_key"` // Encrypt private key in response (default: false, not widely supported)
 }
 
 // ObservabilityConfig configures monitoring and logging
