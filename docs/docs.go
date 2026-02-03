@@ -182,10 +182,7 @@ const docTemplate = `{
                     "200": {
                         "description": "Service is healthy",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/pkg_server.HealthResponse"
                         }
                     },
                     "503": {
@@ -217,6 +214,43 @@ const docTemplate = `{
                             }
                         }
                     }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "pkg_server.HealthResponse": {
+            "type": "object",
+            "properties": {
+                "backend": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "timestamp": {
+                    "type": "string"
+                },
+                "tls_certificate": {
+                    "$ref": "#/definitions/pkg_server.TLSCertInfo"
+                }
+            }
+        },
+        "pkg_server.TLSCertInfo": {
+            "type": "object",
+            "properties": {
+                "days_remaining": {
+                    "type": "integer"
+                },
+                "expires_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "description": "\"ok\", \"warning\", \"critical\", \"expired\"",
+                    "type": "string"
+                },
+                "subject": {
+                    "type": "string"
                 }
             }
         }
@@ -254,7 +288,7 @@ var SwaggerInfo = &swag.Spec{
 	BasePath:         "/",
 	Schemes:          []string{"https", "http"},
 	Title:            "EST Service API",
-    Description:      "Enrollment over Secure Transport (EST) Service implementing RFC 7030.\nThis service provides a standards-compliant EST implementation that uses OpenBao or HashiCorp Vault as the backend PKI system.\n\n**Authentication Methods:**\n- HTTP Basic Auth (mapped to backend userpass or AppRole)\n- TLS Client Certificates (mapped to backend cert auth)\n- Bearer Token (backend token authentication)",
+	Description:      "Enrollment over Secure Transport (EST) Service implementing RFC 7030.\nThis service provides a standards-compliant EST implementation that uses OpenBao or HashiCorp Vault as the backend PKI system.\n\n**Authentication Methods:**\n- HTTP Basic Auth (mapped to backend userpass, LDAP, or AppRole)\n- TLS Client Certificates (mapped to backend cert auth)\n- Bearer Token (backend token authentication)",
 	InfoInstanceName: "swagger",
 	SwaggerTemplate:  docTemplate,
 	LeftDelim:        "{{",

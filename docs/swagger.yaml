@@ -1,4 +1,28 @@
 basePath: /
+definitions:
+  pkg_server.HealthResponse:
+    properties:
+      backend:
+        type: string
+      status:
+        type: string
+      timestamp:
+        type: string
+      tls_certificate:
+        $ref: '#/definitions/pkg_server.TLSCertInfo'
+    type: object
+  pkg_server.TLSCertInfo:
+    properties:
+      days_remaining:
+        type: integer
+      expires_at:
+        type: string
+      status:
+        description: '"ok", "warning", "critical", "expired"'
+        type: string
+      subject:
+        type: string
+    type: object
 host: localhost:8443
 info:
   contact:
@@ -9,7 +33,7 @@ info:
     This service provides a standards-compliant EST implementation that uses OpenBao or HashiCorp Vault as the backend PKI system.
 
     **Authentication Methods:**
-    - HTTP Basic Auth (mapped to backend userpass or AppRole)
+    - HTTP Basic Auth (mapped to backend userpass, LDAP, or AppRole)
     - TLS Client Certificates (mapped to backend cert auth)
     - Bearer Token (backend token authentication)
   license:
@@ -123,9 +147,7 @@ paths:
         "200":
           description: Service is healthy
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/pkg_server.HealthResponse'
         "503":
           description: Service or backend unavailable
           schema:

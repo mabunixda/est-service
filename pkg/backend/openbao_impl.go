@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mabunixda/est-service/pkg/observability"
 	"github.com/openbao/openbao/api/v2"
 )
 
@@ -126,7 +127,8 @@ func (b *openBaoBackend) GetCACertificate(ctx context.Context, mount string) (*x
 
 	b.logger.Info("Retrieved CA certificate from OpenBao",
 		"mount", mount,
-		"subject", cert.Subject.String())
+		"subject", cert.Subject.String(),
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return cert, nil
 }
@@ -175,7 +177,8 @@ func (b *openBaoBackend) GetCAChain(ctx context.Context, mount string) ([]*x509.
 
 	b.logger.Info("Retrieved CA chain from OpenBao",
 		"mount", mount,
-		"certificates", len(certs))
+		"certificates", len(certs),
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return certs, nil
 }
@@ -228,7 +231,8 @@ func (b *openBaoBackend) SignCSR(ctx context.Context, mount, role string, csr *x
 		"mount", mount,
 		"role", role,
 		"subject", cert.Subject.String(),
-		"serial", cert.SerialNumber.String())
+		"serial", cert.SerialNumber.String(),
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return cert, nil
 }
@@ -279,7 +283,8 @@ func (b *openBaoBackend) SignCSRVerbatim(ctx context.Context, mount string, csr 
 	b.logger.Info("Signed CSR verbatim with OpenBao",
 		"mount", mount,
 		"subject", cert.Subject.String(),
-		"serial", cert.SerialNumber.String())
+		"serial", cert.SerialNumber.String(),
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return cert, nil
 }
@@ -326,7 +331,8 @@ func (b *openBaoBackend) AuthenticateUserpass(ctx context.Context, mount, userna
 
 	b.logger.Info("Userpass authentication successful on OpenBao",
 		"username", username,
-		"mount", mount)
+		"mount", mount,
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return secret.Auth.ClientToken, nil
 }
@@ -350,7 +356,8 @@ func (b *openBaoBackend) AuthenticateLDAP(ctx context.Context, mount, username, 
 
 	b.logger.Info("LDAP authentication successful on OpenBao",
 		"username", username,
-		"mount", mount)
+		"mount", mount,
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return secret.Auth.ClientToken, nil
 }
@@ -374,7 +381,8 @@ func (b *openBaoBackend) AuthenticateAppRole(ctx context.Context, mount, roleID,
 	}
 
 	b.logger.Info("AppRole authentication successful on OpenBao",
-		"mount", mount)
+		"mount", mount,
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return secret.Auth.ClientToken, nil
 }
@@ -426,7 +434,8 @@ func (b *openBaoBackend) AuthenticateCert(ctx context.Context, mount string, con
 	b.logger.Info("Certificate authentication successful on OpenBao",
 		"client_subject", cert.Subject.String(),
 		"mount", mount,
-		"role", role)
+		"role", role,
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return secret.Auth.ClientToken, nil
 }

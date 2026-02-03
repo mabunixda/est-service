@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/mabunixda/est-service/pkg/observability"
 	"github.com/openbao/openbao/api/v2"
 )
 
@@ -128,7 +129,8 @@ func (b *vaultBackend) GetCACertificate(ctx context.Context, mount string) (*x50
 
 	b.logger.Info("Retrieved CA certificate from Vault",
 		"mount", mount,
-		"subject", cert.Subject.String())
+		"subject", cert.Subject.String(),
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return cert, nil
 }
@@ -177,7 +179,8 @@ func (b *vaultBackend) GetCAChain(ctx context.Context, mount string) ([]*x509.Ce
 
 	b.logger.Info("Retrieved CA chain from Vault",
 		"mount", mount,
-		"certificates", len(certs))
+		"certificates", len(certs),
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return certs, nil
 }
@@ -230,7 +233,8 @@ func (b *vaultBackend) SignCSR(ctx context.Context, mount, role string, csr *x50
 		"mount", mount,
 		"role", role,
 		"subject", cert.Subject.String(),
-		"serial", cert.SerialNumber.String())
+		"serial", cert.SerialNumber.String(),
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return cert, nil
 }
@@ -281,7 +285,8 @@ func (b *vaultBackend) SignCSRVerbatim(ctx context.Context, mount string, csr *x
 	b.logger.Info("Signed CSR verbatim with Vault",
 		"mount", mount,
 		"subject", cert.Subject.String(),
-		"serial", cert.SerialNumber.String())
+		"serial", cert.SerialNumber.String(),
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return cert, nil
 }
@@ -328,7 +333,8 @@ func (b *vaultBackend) AuthenticateUserpass(ctx context.Context, mount, username
 
 	b.logger.Info("Userpass authentication successful on Vault",
 		"username", username,
-		"mount", mount)
+		"mount", mount,
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return secret.Auth.ClientToken, nil
 }
@@ -352,7 +358,8 @@ func (b *vaultBackend) AuthenticateLDAP(ctx context.Context, mount, username, pa
 
 	b.logger.Info("LDAP authentication successful on Vault",
 		"username", username,
-		"mount", mount)
+		"mount", mount,
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return secret.Auth.ClientToken, nil
 }
@@ -376,7 +383,8 @@ func (b *vaultBackend) AuthenticateAppRole(ctx context.Context, mount, roleID, s
 	}
 
 	b.logger.Info("AppRole authentication successful on Vault",
-		"mount", mount)
+		"mount", mount,
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return secret.Auth.ClientToken, nil
 }
@@ -428,7 +436,8 @@ func (b *vaultBackend) AuthenticateCert(ctx context.Context, mount string, connS
 	b.logger.Info("Certificate authentication successful on Vault",
 		"client_subject", cert.Subject.String(),
 		"mount", mount,
-		"role", role)
+		"role", role,
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return secret.Auth.ClientToken, nil
 }

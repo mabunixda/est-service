@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/mabunixda/est-service/pkg/backend"
+	"github.com/mabunixda/est-service/pkg/observability"
 )
 
 // Manager handles multiple authentication methods for EST
@@ -155,7 +156,8 @@ func (m *Manager) authenticateToken(ctx context.Context, r *http.Request) *Resul
 		}
 	}
 
-	m.logger.Info("Token authentication successful")
+	m.logger.Info("Token authentication successful",
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return &Result{
 		Authenticated: true,
@@ -192,7 +194,8 @@ func (m *Manager) authenticateCert(ctx context.Context, r *http.Request) *Result
 	}
 
 	identity := clientCert.Subject.CommonName
-	m.logger.Info("Certificate authentication successful")
+	m.logger.Info("Certificate authentication successful",
+		"request_id", observability.RequestIDFromContext(ctx))
 
 	return &Result{
 		Authenticated: true,
@@ -253,7 +256,8 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 		triedUserpass = true
 		token, err = m.backend.AuthenticateUserpass(ctx, m.config.UserpassMountPath, username, password)
 		if err == nil {
-			m.logger.Info("Userpass authentication successful")
+			m.logger.Info("Userpass authentication successful",
+				"request_id", observability.RequestIDFromContext(ctx))
 			return &Result{
 				Authenticated: true,
 				Token:         token,
@@ -269,7 +273,8 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 		triedLDAP = true
 		token, err = m.backend.AuthenticateLDAP(ctx, m.config.LDAPMountPath, username, password)
 		if err == nil {
-			m.logger.Info("LDAP authentication successful")
+			m.logger.Info("LDAP authentication successful",
+				"request_id", observability.RequestIDFromContext(ctx))
 			return &Result{
 				Authenticated: true,
 				Token:         token,
@@ -284,7 +289,8 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 		triedAppRole = true
 		token, err = m.backend.AuthenticateAppRole(ctx, m.config.AppRoleMountPath, username, password)
 		if err == nil {
-			m.logger.Info("AppRole authentication successful")
+			m.logger.Info("AppRole authentication successful",
+				"request_id", observability.RequestIDFromContext(ctx))
 			return &Result{
 				Authenticated: true,
 				Token:         token,
