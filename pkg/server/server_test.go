@@ -130,19 +130,8 @@ func (m *mockBackend) Close() error {
 }
 
 // Helper to create a backend.Client with a mockBackend
-// This uses reflection since backend.Client.backend is unexported
 func newMockBackendClient(mock *mockBackend) *backend.Client {
-	// We can't directly set the unexported field, but we can create
-	// a Client and use a test-specific approach
-	// For now, we'll use the fact that New() calls backend.Health()
-	// and we can't easily inject it. The better approach is to test
-	// the handler with a mock that fails health checks or succeeds.
-	//
-	// Actually, since the backend field is unexported, we can't set it in tests.
-	// The existing tests work around this by not calling the real healthHandler.
-	// We should document that healthHandler can't be fully unit tested without
-	// refactoring to allow dependency injection, or we accept integration tests only.
-	return &backend.Client{}
+	return backend.NewClientWithBackend(mock)
 }
 
 func TestServerCreation(t *testing.T) {
@@ -303,14 +292,34 @@ func TestReadyHandler(t *testing.T) {
 	tests := []struct {
 		name           string
 		method         string
+		healthFunc     func(context.Context) (*api.HealthResponse, error)
 		expectedStatus int
 		expectedBody   string
 	}{
 		{
-			name:           "ready",
-			method:         "GET",
+			name:   "ready",
+			method: "GET",
+			healthFunc: func(ctx context.Context) (*api.HealthResponse, error) {
+				return &api.HealthResponse{Initialized: true, Sealed: false, Version: "test"}, nil
+			},
 			expectedStatus: http.StatusOK,
-			expectedBody:   `{"status":"ready"}`,
+			expectedBody:   `{"status":"ready","backend":"connected"}`,
+		},
+		{
+			name:   "backend unavailable",
+			method: "GET",
+			healthFunc: func(ctx context.Context) (*api.HealthResponse, error) {
+				return nil, fmt.Errorf("backend unavailable")
+			},
+			expectedStatus: http.StatusServiceUnavailable,
+		},
+		{
+			name:   "backend sealed",
+			method: "GET",
+			healthFunc: func(ctx context.Context) (*api.HealthResponse, error) {
+				return &api.HealthResponse{Initialized: true, Sealed: true, Version: "test"}, nil
+			},
+			expectedStatus: http.StatusServiceUnavailable,
 		},
 		{
 			name:           "invalid method",
@@ -330,7 +339,12 @@ func TestReadyHandler(t *testing.T) {
 				},
 			}
 
-			srv, err := New(&backend.Client{}, cfg, slog.Default())
+			mockBE := &mockBackend{
+				healthFunc: tt.healthFunc,
+			}
+			backendClient := newMockBackendClient(mockBE)
+
+			srv, err := New(backendClient, cfg, slog.Default())
 			if err != nil {
 				t.Fatalf("Failed to create server: %v", err)
 			}

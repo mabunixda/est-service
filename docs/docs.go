@@ -194,9 +194,40 @@ const docTemplate = `{
                 }
             }
         },
+        "/health/deep": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Get detailed health information including backend status, TLS certificate info, and system metrics",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "Health"
+                ],
+                "summary": "Deep health check",
+                "responses": {
+                    "200": {
+                        "description": "Detailed health information",
+                        "schema": {
+                            "$ref": "#/definitions/pkg_server.DeepHealthResponse"
+                        }
+                    },
+                    "503": {
+                        "description": "Service degraded or unhealthy",
+                        "schema": {
+                            "$ref": "#/definitions/pkg_server.DeepHealthResponse"
+                        }
+                    }
+                }
+            }
+        },
         "/ready": {
             "get": {
-                "description": "Check if the service is ready to accept requests",
+                "description": "Check if the service is ready to accept requests (includes backend connectivity check)",
                 "produces": [
                     "application/json"
                 ],
@@ -213,12 +244,103 @@ const docTemplate = `{
                                 "type": "string"
                             }
                         }
+                    },
+                    "503": {
+                        "description": "Service not ready",
+                        "schema": {
+                            "type": "string"
+                        }
                     }
                 }
             }
         }
     },
     "definitions": {
+        "pkg_server.BackendHealthDetail": {
+            "type": "object",
+            "properties": {
+                "address": {
+                    "description": "Backend address",
+                    "type": "string"
+                },
+                "cluster_id": {
+                    "type": "string"
+                },
+                "cluster_name": {
+                    "type": "string"
+                },
+                "initialized": {
+                    "description": "Whether backend is initialized",
+                    "type": "boolean"
+                },
+                "replication_dr": {
+                    "type": "string"
+                },
+                "replication_performance": {
+                    "type": "string"
+                },
+                "response_time": {
+                    "description": "Backend response time",
+                    "type": "string"
+                },
+                "sealed": {
+                    "description": "Whether backend is sealed",
+                    "type": "boolean"
+                },
+                "status": {
+                    "description": "\"healthy\", \"degraded\", \"unhealthy\"",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "\"vault\" or \"openbao\"",
+                    "type": "string"
+                },
+                "version": {
+                    "description": "Backend version",
+                    "type": "string"
+                }
+            }
+        },
+        "pkg_server.DeepHealthResponse": {
+            "type": "object",
+            "properties": {
+                "backend": {
+                    "description": "Backend detailed health",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/pkg_server.BackendHealthDetail"
+                        }
+                    ]
+                },
+                "rate_limiter": {
+                    "description": "Rate limiter status",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/pkg_server.RateLimiterHealth"
+                        }
+                    ]
+                },
+                "status": {
+                    "description": "Overall status: \"healthy\", \"degraded\", \"unhealthy\"",
+                    "type": "string"
+                },
+                "timestamp": {
+                    "description": "ISO 8601 timestamp",
+                    "type": "string"
+                },
+                "tls_certificate": {
+                    "$ref": "#/definitions/pkg_server.TLSCertInfo"
+                },
+                "uptime": {
+                    "description": "Service uptime duration",
+                    "type": "string"
+                },
+                "version": {
+                    "description": "Application version (if available)",
+                    "type": "string"
+                }
+            }
+        },
         "pkg_server.HealthResponse": {
             "type": "object",
             "properties": {
@@ -233,6 +355,30 @@ const docTemplate = `{
                 },
                 "tls_certificate": {
                     "$ref": "#/definitions/pkg_server.TLSCertInfo"
+                }
+            }
+        },
+        "pkg_server.RateLimiterHealth": {
+            "type": "object",
+            "properties": {
+                "auth_limit": {
+                    "description": "Requests per second for auth endpoints",
+                    "type": "integer"
+                },
+                "burst_auth": {
+                    "description": "Burst size for auth endpoints",
+                    "type": "integer"
+                },
+                "burst_general": {
+                    "description": "Burst size for general endpoints",
+                    "type": "integer"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "general_limit": {
+                    "description": "Requests per second for general endpoints",
+                    "type": "integer"
                 }
             }
         },

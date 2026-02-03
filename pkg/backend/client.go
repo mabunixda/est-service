@@ -29,6 +29,14 @@ func NewClient(ctx context.Context, cfg *Config, logger *slog.Logger) (*Client, 
 	}, nil
 }
 
+// NewClientWithBackend creates a new Client with a custom Backend implementation
+// This is primarily used for testing to allow injecting mock backends
+func NewClientWithBackend(backend Backend) *Client {
+	return &Client{
+		backend: backend,
+	}
+}
+
 // Health checks the health of the backend server
 func (c *Client) Health(ctx context.Context) (*api.HealthResponse, error) {
 	return c.backend.Health(ctx)

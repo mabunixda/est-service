@@ -32,6 +32,7 @@ type Server struct {
 	telemetry       *Telemetry
 	rateLimiter     *RateLimiter // General rate limiter for all endpoints
 	authRateLimiter *RateLimiter // Stricter rate limiter for auth endpoints
+	startTime       time.Time    // Server start time for uptime tracking
 }
 
 // Config holds server configuration
@@ -85,6 +86,41 @@ type TLSCertInfo struct {
 	DaysRemaining int    `json:"days_remaining"`
 	Subject       string `json:"subject"`
 	Status        string `json:"status"` // "ok", "warning", "critical", "expired"
+}
+
+// DeepHealthResponse contains detailed health information for the /health/deep endpoint
+type DeepHealthResponse struct {
+	Status      string              `json:"status"`    // Overall status: "healthy", "degraded", "unhealthy"
+	Timestamp   string              `json:"timestamp"` // ISO 8601 timestamp
+	Version     string              `json:"version"`   // Application version (if available)
+	Uptime      string              `json:"uptime"`    // Service uptime duration
+	Backend     BackendHealthDetail `json:"backend"`   // Backend detailed health
+	TLSCert     *TLSCertInfo        `json:"tls_certificate,omitempty"`
+	RateLimiter RateLimiterHealth   `json:"rate_limiter"` // Rate limiter status
+}
+
+// BackendHealthDetail contains detailed backend health information
+type BackendHealthDetail struct {
+	Status        string `json:"status"`        // "healthy", "degraded", "unhealthy"
+	Type          string `json:"type"`          // "vault" or "openbao"
+	Address       string `json:"address"`       // Backend address
+	Version       string `json:"version"`       // Backend version
+	Sealed        bool   `json:"sealed"`        // Whether backend is sealed
+	Initialized   bool   `json:"initialized"`   // Whether backend is initialized
+	ResponseTime  string `json:"response_time"` // Backend response time
+	ClusterName   string `json:"cluster_name,omitempty"`
+	ClusterID     string `json:"cluster_id,omitempty"`
+	ReplicationDR string `json:"replication_dr,omitempty"`
+	ReplicationPR string `json:"replication_performance,omitempty"`
+}
+
+// RateLimiterHealth contains rate limiter status
+type RateLimiterHealth struct {
+	Enabled      bool `json:"enabled"`
+	General      int  `json:"general_limit"` // Requests per second for general endpoints
+	Auth         int  `json:"auth_limit"`    // Requests per second for auth endpoints
+	BurstGeneral int  `json:"burst_general"` // Burst size for general endpoints
+	BurstAuth    int  `json:"burst_auth"`    // Burst size for auth endpoints
 }
 
 // New creates a new EST server
@@ -151,6 +187,7 @@ func New(backend *backend.Client, cfg *Config, logger *slog.Logger) (*Server, er
 		telemetry:       telemetry,
 		rateLimiter:     rateLimiter,
 		authRateLimiter: authRateLimiter,
+		startTime:       time.Now(),
 	}
 
 	if cfg.AuditLogger != nil {
@@ -246,6 +283,13 @@ func (s *Server) setupRoutes() *http.ServeMux {
 	// Health check
 	mux.HandleFunc("/health", s.healthHandler)
 	mux.HandleFunc("/ready", s.readyHandler)
+
+	// Deep health check (authenticated if internal endpoints auth is enabled)
+	if s.config.InternalEndpointsAuth {
+		mux.Handle("/health/deep", s.loggingMiddleware(s.recoveryMiddleware(s.authMiddleware(http.HandlerFunc(s.deepHealthHandler)))))
+	} else {
+		mux.HandleFunc("/health/deep", s.deepHealthHandler)
+	}
 
 	// Swagger documentation
 	if s.config.InternalEndpointsAuth {
@@ -689,12 +733,13 @@ func (s *Server) healthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// readyHandler handles readiness check requests
+// readyHandler handles readiness check requests with backend connectivity check
 // @Summary Readiness check
-// @Description Check if the service is ready to accept requests
+// @Description Check if the service is ready to accept requests (includes backend connectivity check)
 // @Tags Health
 // @Produce json
 // @Success 200 {object} map[string]string "Service is ready"
+// @Failure 503 {string} string "Service not ready"
 // @Router /ready [get]
 func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -702,10 +747,219 @@ func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Quick backend connectivity check with short timeout
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	health, err := s.backend.Health(ctx)
+	if err != nil {
+		s.logger.Warn("Backend connectivity check failed for readiness", "error", err)
+		http.Error(w, "Backend unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	if health.Sealed {
+		s.logger.Warn("Backend is sealed, service not ready")
+		http.Error(w, "Backend sealed", http.StatusServiceUnavailable)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	if _, err := fmt.Fprintf(w, `{"status":"ready"}`); err != nil {
+	if _, err := fmt.Fprintf(w, `{"status":"ready","backend":"connected"}`); err != nil {
 		s.logger.Error("Failed to write ready response", "error", err)
+	}
+}
+
+// deepHealthHandler handles detailed health check requests with comprehensive status information
+// @Summary Deep health check
+// @Description Get detailed health information including backend status, TLS certificate info, and system metrics
+// @Tags Health
+// @Produce json
+// @Success 200 {object} DeepHealthResponse "Detailed health information"
+// @Failure 503 {object} DeepHealthResponse "Service degraded or unhealthy"
+// @Router /health/deep [get]
+// @Security BearerAuth
+func (s *Server) deepHealthHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Detailed backend health check
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	startTime := time.Now()
+	health, err := s.backend.Health(ctx)
+	responseTime := time.Since(startTime)
+
+	// Determine overall service status
+	serviceStatus := "healthy"
+	backendStatus := BackendHealthDetail{
+		Type:         string(s.backend.Type()),
+		Address:      s.backend.GetAPIClient().Address(),
+		ResponseTime: responseTime.String(),
+	}
+
+	if err != nil {
+		s.logger.Error("Deep health check: backend health check failed", "error", err)
+		serviceStatus = "unhealthy"
+		backendStatus.Status = "unhealthy"
+	} else {
+		backendStatus.Version = health.Version
+		backendStatus.Sealed = health.Sealed
+		backendStatus.Initialized = health.Initialized
+		backendStatus.ClusterName = health.ClusterName
+		backendStatus.ClusterID = health.ClusterID
+
+		// Check replication status
+		if health.ReplicationDRMode != "" {
+			backendStatus.ReplicationDR = health.ReplicationDRMode
+		}
+		if health.ReplicationPerformanceMode != "" {
+			backendStatus.ReplicationPR = health.ReplicationPerformanceMode
+		}
+
+		if health.Sealed {
+			serviceStatus = "unhealthy"
+			backendStatus.Status = "unhealthy"
+		} else if !health.Initialized {
+			serviceStatus = "degraded"
+			backendStatus.Status = "degraded"
+		} else if responseTime > 1*time.Second {
+			serviceStatus = "degraded"
+			backendStatus.Status = "degraded"
+		} else {
+			backendStatus.Status = "healthy"
+		}
+	}
+
+	// Build deep health response
+	response := DeepHealthResponse{
+		Status:    serviceStatus,
+		Timestamp: time.Now().Format(time.RFC3339),
+		Uptime:    time.Since(s.startTime).String(),
+		Backend:   backendStatus,
+	}
+
+	// Add TLS certificate info if configured
+	if s.httpServer.TLSConfig != nil && len(s.httpServer.TLSConfig.Certificates) > 0 {
+		cert := s.httpServer.TLSConfig.Certificates[0]
+		if cert.Leaf != nil {
+			daysRemaining := int(time.Until(cert.Leaf.NotAfter).Hours() / 24)
+			certStatus := "ok"
+
+			if daysRemaining < 0 {
+				certStatus = "expired"
+				if serviceStatus == "healthy" {
+					serviceStatus = "degraded"
+				}
+			} else if daysRemaining < 7 {
+				certStatus = "critical"
+				if serviceStatus == "healthy" {
+					serviceStatus = "degraded"
+				}
+			} else if daysRemaining < 30 {
+				certStatus = "warning"
+			}
+
+			response.TLSCert = &TLSCertInfo{
+				ExpiresAt:     cert.Leaf.NotAfter.Format(time.RFC3339),
+				DaysRemaining: daysRemaining,
+				Subject:       cert.Leaf.Subject.CommonName,
+				Status:        certStatus,
+			}
+		}
+	}
+
+	// Add rate limiter status
+	response.RateLimiter = RateLimiterHealth{
+		Enabled: s.rateLimiter != nil,
+	}
+	if s.rateLimiter != nil && s.config.RateLimit != nil {
+		response.RateLimiter.General = s.config.RateLimit.RequestsPerSecond
+		response.RateLimiter.BurstGeneral = s.config.RateLimit.Burst
+	}
+	if s.authRateLimiter != nil && s.config.RateLimit != nil {
+		response.RateLimiter.Auth = s.config.RateLimit.AuthRequestsPerSecond
+		response.RateLimiter.BurstAuth = s.config.RateLimit.AuthBurst
+	}
+
+	// Set HTTP status code based on service status
+	statusCode := http.StatusOK
+	if serviceStatus == "unhealthy" {
+		statusCode = http.StatusServiceUnavailable
+	} else if serviceStatus == "degraded" {
+		statusCode = http.StatusOK // Still return 200 for degraded, but with status in body
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+
+	// Use json package for proper encoding of complex structure
+	if _, err := fmt.Fprintf(w, `{"status":"%s","timestamp":"%s","uptime":"%s","backend":{"status":"%s","type":"%s","address":"%s","version":"%s","sealed":%t,"initialized":%t,"response_time":"%s"`,
+		response.Status, response.Timestamp, response.Uptime,
+		response.Backend.Status, response.Backend.Type, response.Backend.Address,
+		response.Backend.Version, response.Backend.Sealed, response.Backend.Initialized,
+		response.Backend.ResponseTime); err != nil {
+		s.logger.Error("Failed to write deep health response", "error", err)
+		return
+	}
+
+	// Add optional backend fields
+	if response.Backend.ClusterName != "" {
+		if _, err := fmt.Fprintf(w, `,"cluster_name":"%s"`, response.Backend.ClusterName); err != nil {
+			s.logger.Error("Failed to write cluster name", "error", err)
+			return
+		}
+	}
+	if response.Backend.ClusterID != "" {
+		if _, err := fmt.Fprintf(w, `,"cluster_id":"%s"`, response.Backend.ClusterID); err != nil {
+			s.logger.Error("Failed to write cluster ID", "error", err)
+			return
+		}
+	}
+	if response.Backend.ReplicationDR != "" {
+		if _, err := fmt.Fprintf(w, `,"replication_dr":"%s"`, response.Backend.ReplicationDR); err != nil {
+			s.logger.Error("Failed to write replication DR", "error", err)
+			return
+		}
+	}
+	if response.Backend.ReplicationPR != "" {
+		if _, err := fmt.Fprintf(w, `,"replication_performance":"%s"`, response.Backend.ReplicationPR); err != nil {
+			s.logger.Error("Failed to write replication performance", "error", err)
+			return
+		}
+	}
+
+	// Close backend object
+	if _, err := fmt.Fprintf(w, `}`); err != nil {
+		s.logger.Error("Failed to close backend object", "error", err)
+		return
+	}
+
+	// Add TLS cert info if present
+	if response.TLSCert != nil {
+		if _, err := fmt.Fprintf(w, `,"tls_certificate":{"expires_at":"%s","days_remaining":%d,"subject":"%s","status":"%s"}`,
+			response.TLSCert.ExpiresAt, response.TLSCert.DaysRemaining,
+			response.TLSCert.Subject, response.TLSCert.Status); err != nil {
+			s.logger.Error("Failed to write TLS cert info", "error", err)
+			return
+		}
+	}
+
+	// Add rate limiter status
+	if _, err := fmt.Fprintf(w, `,"rate_limiter":{"enabled":%t,"general_limit":%d,"auth_limit":%d,"burst_general":%d,"burst_auth":%d}`,
+		response.RateLimiter.Enabled, response.RateLimiter.General, response.RateLimiter.Auth,
+		response.RateLimiter.BurstGeneral, response.RateLimiter.BurstAuth); err != nil {
+		s.logger.Error("Failed to write rate limiter info", "error", err)
+		return
+	}
+
+	// Close response
+	if _, err := fmt.Fprintf(w, `}`); err != nil {
+		s.logger.Error("Failed to close deep health response", "error", err)
 	}
 }
 
