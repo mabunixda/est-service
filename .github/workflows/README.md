@@ -8,62 +8,24 @@ This directory contains CI/CD workflows for the EST Service project.
 Runs on every push and pull request.
 
 **Jobs:**
-- **Test**: Unit tests across Go 1.21, 1.22, 1.23 with coverage
-- **Lint**: Code quality checks with golangci-lint
-- **Build**: Binary compilation and Docker image build
-- **Integration Test**: Full integration tests with Vault
-- **OpenAPI Validation**: API spec validation
+- **Test**: Unit tests with coverage
+- **Lint**: golangci-lint checks
+- **Build**: Binary build
+- **Integration Test**: Integration tests against backend
+- **OpenAPI Validation**: OpenAPI spec validation
 
 ### [security.yml](security.yml) - Security Scanning
-Runs on push, pull request, and daily schedule.
+Runs on push, pull request, and scheduled scans.
 
 **Jobs:**
-- **govulncheck**: Go vulnerability scanner
+- **govulncheck**: Go vulnerability scanning
 - **gosec**: Static security analysis
 - **Trivy**: Container vulnerability scanning
-- **Dependency Review**: PR dependency analysis
-- **Secret Scanning**: Detect leaked secrets with TruffleHog
+- **Dependency Review**: PR dependency checks
+- **Secret Scanning**: Detect leaked secrets
 
-### [codeql.yml](codeql.yml) - Code Analysis
-Runs on push, pull request, and wee# GitHub Actions Workflows
+### [release.yml](release.yml) - Release Builds
+Builds and publishes release artifacts.
 
-This directory contains CI/CD workflows for the EST Service project.
-
-## Workflows
-ml
-This directory contains ns 
-## Workflows
-
-### [ci.yml](ci.yml) - Continuous Integration
-Runs o bi
-### [ci.ym
-- Runs on every push and pull request.
-
-**JobsKu
-**Jobs:**
-- **Test**: Unit tests aSta- **Testes- **Lint**: Code quality checks with golangci-lint
-- **Build**un- **Build**: Binary compilation and Dockerbadge.svg- **Integration Test**: Full integration tests with Vor- **OpenAPI Validation**: API spec validation
-
-### [secu/e
-### [security.yml](security.yml) - SecuritydgeRuns on push, pull request, and daily schedule.
-
-**io
-**Jobs:**
-- **govulncheck**: Go vulnerabilitygit- **govuma- **gosec**: Static security analysis
-- **ql- **Trivy**: Container vulnerab.com/ma- **Dependency Review**: PR dependency analy.y- **Secret Scanning**: Detect leaked secrets wto
-### [codeql.yml](codeql.yml) - Code Analysis
-Runs oRun workflRuns on push, pull request, and wee# GitHubui
-This directory contains CI/CD workflows for the EST Servicens
-
-## Workflows
-ml
-This directory contains ns 
-## Workflows
-
-### [ci.Optml
-This dirDoTke## Workflows
-
-### [ci.yml]ee
-### [ci.ym.mdRuns o bi
-### [ci.ym
-- Runs on every push antion.
+### [openapi.yml](openapi.yml) / [openapi.yaml](openapi.yaml)
+OpenAPI linting/validation workflows.

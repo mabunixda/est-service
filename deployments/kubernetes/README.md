@@ -1,6 +1,14 @@
 # Kubernetes Deployment Guide
 
-Complete Kubernetes manifests for deploying EST Service.
+Complete Kubernetes manifests for deploying EST Service with RFC 7030 compliance.
+
+## Features
+
+- **RFC 7030 Compliance**: All mandatory endpoints + optional `/csrattrs` and `/serverkeygen`
+- **High Availability**: Multi-replica deployment with HPA
+- **Security**: Pod security policies, RBAC, network policies
+- **Monitoring**: Prometheus ServiceMonitor integration
+- **Health Checks**: Liveness and readiness probes
 
 ## Prerequisites
 
@@ -22,14 +30,17 @@ kubectl create namespace est-service
 
 ### 2. Create secrets
 
-Generate TLS certificates:
-```bash
-# Generate server certificate
-openssl req -x509 -newkey rsa:4096 -nodes \
-  -keyout server.key -out server.crt -days 365 \
-  -subj "/CN=est.example.com"
+**TLS certificates should be issued by your backend PKI (Vault/OpenBao) or cert-manager.**
+Avoid self-signed OpenSSL certs outside of dev/test environments.
 
-# Create TLS secret
+#### Option A: cert-manager (recommended)
+Use cert-manager to request and rotate the EST service TLS certificate, then it will create the Kubernetes TLS secret automatically.
+
+#### Option B: Vault/OpenBao PKI
+Issue a server certificate from the PKI backend and create the TLS secret from that certificate and key:
+
+```bash
+# Create TLS secret from PKI-issued cert/key
 kubectl create secret tls est-service-tls \
   --cert=server.crt --key=server.key \
   -n est-service
@@ -66,13 +77,7 @@ Edit `ingress.yaml` with your domain, then:
 kubectl apply -f ingress.yaml
 ```
 
-### 6. Enable autoscaling (optional)
-
-```bash
-kubectl apply -f autoscaling.yaml
-```
-
-### 7. Setup monitoring (optional)
+### 6. Setup monitoring (optional)
 
 If using Prometheus Operator:
 ```bash
@@ -107,8 +112,22 @@ curl http://localhost:9090/metrics
 Edit `configmap.yaml` to customize:
 - Backend connection (OpenBao/Vault address)
 - EST policies and labels
+- Optional endpoints (`csrattrs`, `serverkeygen`)
 - Rate limiting settings
 - Log level
+
+**Important:** Review optional endpoint configuration:
+```yaml
+est:
+  # Optional: CSR Attributes
+  csr_attrs:
+    enabled: false  # Set to true if needed
+    
+  # Optional: Server-side key generation (for IoT devices)
+  server_key_gen:
+    enabled: false  # Set to true only if needed
+    use_auth_token: true  # Must be true for security
+```
 
 Apply changes:
 ```bash
@@ -134,35 +153,6 @@ kubectl create secret generic openbao-token \
 kubectl rollout restart deployment/est-service -n est-service
 ```
 
-## Scaling
-
-### Manual scaling
-
-```bash
-kubectl scale deployment/est-service --replicas=5 -n est-service
-```
-
-### Horizontal Pod Autoscaler
-
-The HPA automatically scales based on CPU/memory:
-- Min replicas: 2
-- Max replicas: 10
-- Target CPU: 70%
-- Target Memory: 80%
-
-Monitor autoscaling:
-```bash
-kubectl get hpa -n est-service
-kubectl describe hpa est-service -n est-service
-```
-
-### Pod Disruption Budget
-
-PDB ensures at least 1 pod is always available during disruptions:
-```bash
-kubectl get pdb -n est-service
-```
-
 ## Monitoring
 
 ### Prometheus Integration
@@ -179,13 +169,6 @@ kubectl port-forward -n monitoring svc/prometheus 9090:9090
 # Query metrics
 curl 'http://localhost:9090/api/v1/query?query=est_requests_total'
 ```
-
-### Grafana Dashboards
-
-Import the EST Service dashboard:
-1. Open Grafana
-2. Import dashboard from JSON
-3. Use `deployments/grafana/dashboards/est-service.json`
 
 ## Security
 
@@ -285,7 +268,6 @@ kubectl get secret est-service-tls -n est-service -o jsonpath='{.data.tls\.crt}'
 Check resource usage:
 ```bash
 kubectl top pods -n est-service
-kubectl describe hpa est-service -n est-service
 ```
 
 Increase resources if needed (edit deployment.yaml).
@@ -297,7 +279,7 @@ Increase resources if needed (edit deployment.yaml).
 ```bash
 # Update image
 kubectl set image deployment/est-service \
-  est-service=est-service:v2.0.0 \
+  est-service=est-service:v1.1.0\
   -n est-service
 
 # Monitor rollout
@@ -305,30 +287,6 @@ kubectl rollout status deployment/est-service -n est-service
 
 # Rollback if needed
 kubectl rollout undo deployment/est-service -n est-service
-```
-
-### Blue-Green deployment
-
-1. Deploy new version with different label
-2. Test new version
-3. Switch service selector
-4. Remove old deployment
-
-## Backup and Recovery
-
-### Backup configuration
-
-```bash
-kubectl get configmap est-service-config -n est-service -o yaml > backup-config.yaml
-kubectl get secret est-service-tls -n est-service -o yaml > backup-tls.yaml
-```
-
-### Restore from backup
-
-```bash
-kubectl apply -f backup-config.yaml
-kubectl apply -f backup-tls.yaml
-kubectl rollout restart deployment/est-service -n est-service
 ```
 
 ## Production Checklist
@@ -346,6 +304,8 @@ kubectl rollout restart deployment/est-service -n est-service
 - [ ] Security scanning enabled
 - [ ] Rate limiting configured
 - [ ] Backend high availability
+- [ ] Optional endpoints reviewed (`/serverkeygen` only if needed)
+- [ ] `developer_mode: false` in production
 
 ## Next Steps
 
