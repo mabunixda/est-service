@@ -198,6 +198,7 @@ var oidChangeSubjectName = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 9, 8}
 func ValidateReenrollmentSubject(csr *x509.CertificateRequest, existingCert *x509.Certificate) error {
 	// Check if ChangeSubjectName attribute is present in CSR
 	hasChangeSubjectName := false
+	//nolint:staticcheck // SA1019: Attributes is deprecated but required for RFC 6402 ChangeSubjectName attribute
 	for _, attr := range csr.Attributes {
 		if attr.Type.Equal(oidChangeSubjectName) {
 			hasChangeSubjectName = true

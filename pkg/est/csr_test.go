@@ -1,6 +1,8 @@
 package est
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -672,6 +674,308 @@ func TestIPSlicesEqual(t *testing.T) {
 			result := ipSlicesEqual(tt.a, tt.b)
 			if result != tt.expected {
 				t.Errorf("ipSlicesEqual(%v, %v) = %v, want %v", tt.a, tt.b, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestValidateCSRSignatureAlgorithm_EmptyWhitelist(t *testing.T) {
+	// Generate RSA CSR
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("Failed to generate key: %v", err)
+	}
+
+	template := &x509.CertificateRequest{
+		Subject: pkix.Name{
+			CommonName: "test.example.com",
+		},
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, template, privateKey)
+	if err != nil {
+		t.Fatalf("Failed to create CSR: %v", err)
+	}
+
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		t.Fatalf("Failed to parse CSR: %v", err)
+	}
+
+	// Empty whitelist should allow all algorithms
+	err = ValidateCSRSignatureAlgorithm(csr, []string{})
+	if err != nil {
+		t.Errorf("Empty whitelist should allow any algorithm, got error: %v", err)
+	}
+
+	err = ValidateCSRSignatureAlgorithm(csr, nil)
+	if err != nil {
+		t.Errorf("Nil whitelist should allow any algorithm, got error: %v", err)
+	}
+}
+
+func TestValidateCSRSignatureAlgorithm_AllowedRSA(t *testing.T) {
+	// Generate RSA CSR with SHA256
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("Failed to generate key: %v", err)
+	}
+
+	template := &x509.CertificateRequest{
+		Subject: pkix.Name{
+			CommonName: "test.example.com",
+		},
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, template, privateKey)
+	if err != nil {
+		t.Fatalf("Failed to create CSR: %v", err)
+	}
+
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		t.Fatalf("Failed to parse CSR: %v", err)
+	}
+
+	// CSR should use SHA256WithRSA (default for RSA)
+	if csr.SignatureAlgorithm != x509.SHA256WithRSA {
+		t.Logf("Note: CSR uses %s instead of SHA256WithRSA", csr.SignatureAlgorithm.String())
+	}
+
+	// Whitelist should allow SHA256WithRSA
+	allowed := []string{"SHA256WithRSA", "SHA384WithRSA", "SHA512WithRSA"}
+	err = ValidateCSRSignatureAlgorithm(csr, allowed)
+	if err != nil {
+		t.Errorf("SHA256WithRSA should be allowed, got error: %v", err)
+	}
+}
+
+func TestValidateCSRSignatureAlgorithm_AllowedECDSA(t *testing.T) {
+	// Generate ECDSA CSR with P256 (uses SHA256)
+	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("Failed to generate ECDSA key: %v", err)
+	}
+
+	template := &x509.CertificateRequest{
+		Subject: pkix.Name{
+			CommonName: "test.example.com",
+		},
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, template, privateKey)
+	if err != nil {
+		t.Fatalf("Failed to create CSR: %v", err)
+	}
+
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		t.Fatalf("Failed to parse CSR: %v", err)
+	}
+
+	// CSR should use ECDSAWithSHA256
+	if csr.SignatureAlgorithm != x509.ECDSAWithSHA256 {
+		t.Logf("Note: CSR uses %s instead of ECDSAWithSHA256", csr.SignatureAlgorithm.String())
+	}
+
+	// Whitelist should allow ECDSAWithSHA256
+	allowed := []string{"ECDSAWithSHA256", "ECDSAWithSHA384", "ECDSAWithSHA512"}
+	err = ValidateCSRSignatureAlgorithm(csr, allowed)
+	if err != nil {
+		t.Errorf("ECDSAWithSHA256 should be allowed, got error: %v", err)
+	}
+}
+
+func TestValidateCSRSignatureAlgorithm_DisallowedAlgorithm(t *testing.T) {
+	// Generate RSA CSR (uses SHA256WithRSA)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("Failed to generate key: %v", err)
+	}
+
+	template := &x509.CertificateRequest{
+		Subject: pkix.Name{
+			CommonName: "test.example.com",
+		},
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, template, privateKey)
+	if err != nil {
+		t.Fatalf("Failed to create CSR: %v", err)
+	}
+
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		t.Fatalf("Failed to parse CSR: %v", err)
+	}
+
+	// Whitelist only allows ECDSA algorithms
+	allowed := []string{"ECDSAWithSHA256", "ECDSAWithSHA384"}
+	err = ValidateCSRSignatureAlgorithm(csr, allowed)
+	if err == nil {
+		t.Error("RSA CSR should be rejected when only ECDSA is allowed")
+	}
+
+	// Verify error message mentions the algorithm
+	if err != nil && !strings.Contains(err.Error(), "not allowed") {
+		t.Errorf("Error should mention algorithm not allowed, got: %v", err)
+	}
+}
+
+func TestValidateCSRSignatureAlgorithm_CaseInsensitive(t *testing.T) {
+	// Generate RSA CSR
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("Failed to generate key: %v", err)
+	}
+
+	template := &x509.CertificateRequest{
+		Subject: pkix.Name{
+			CommonName: "test.example.com",
+		},
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, template, privateKey)
+	if err != nil {
+		t.Fatalf("Failed to create CSR: %v", err)
+	}
+
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		t.Fatalf("Failed to parse CSR: %v", err)
+	}
+
+	tests := []struct {
+		name    string
+		allowed []string
+	}{
+		{"lowercase", []string{"sha256withrsa"}},
+		{"uppercase", []string{"SHA256WITHRSA"}},
+		{"mixed case", []string{"Sha256WithRsa"}},
+		{"with spaces", []string{" SHA256WithRSA "}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateCSRSignatureAlgorithm(csr, tt.allowed)
+			if err != nil {
+				t.Errorf("Algorithm matching should be case-insensitive for %s, got error: %v", tt.name, err)
+			}
+		})
+	}
+}
+
+func TestValidateCSRSignatureAlgorithm_InvalidConfigurationAllInvalid(t *testing.T) {
+	// Generate RSA CSR
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("Failed to generate key: %v", err)
+	}
+
+	template := &x509.CertificateRequest{
+		Subject: pkix.Name{
+			CommonName: "test.example.com",
+		},
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, template, privateKey)
+	if err != nil {
+		t.Fatalf("Failed to create CSR: %v", err)
+	}
+
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		t.Fatalf("Failed to parse CSR: %v", err)
+	}
+
+	// Whitelist with all invalid algorithm names
+	allowed := []string{"InvalidAlgo1", "NotAnAlgorithm", "BadConfig"}
+	err = ValidateCSRSignatureAlgorithm(csr, allowed)
+	if err == nil {
+		t.Error("Should return error when all configured algorithms are invalid")
+	}
+
+	if err != nil && !strings.Contains(err.Error(), "no valid signature algorithms configured") {
+		t.Errorf("Error should mention invalid configuration, got: %v", err)
+	}
+}
+
+func TestValidateCSRSignatureAlgorithm_MixedValidInvalid(t *testing.T) {
+	// Generate RSA CSR
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("Failed to generate key: %v", err)
+	}
+
+	template := &x509.CertificateRequest{
+		Subject: pkix.Name{
+			CommonName: "test.example.com",
+		},
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, template, privateKey)
+	if err != nil {
+		t.Fatalf("Failed to create CSR: %v", err)
+	}
+
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		t.Fatalf("Failed to parse CSR: %v", err)
+	}
+
+	// Whitelist with mix of valid and invalid names
+	// Invalid names should be ignored, valid ones should work
+	allowed := []string{"InvalidAlgo", "SHA256WithRSA", "NotAnAlgorithm", "SHA384WithRSA"}
+	err = ValidateCSRSignatureAlgorithm(csr, allowed)
+	if err != nil {
+		t.Errorf("Should accept CSR when valid algorithms are in whitelist, got error: %v", err)
+	}
+}
+
+func TestParseSignatureAlgorithm(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected x509.SignatureAlgorithm
+		wantOk   bool
+	}{
+		// RSA algorithms
+		{"MD5WithRSA", "MD5WithRSA", x509.MD5WithRSA, true},
+		{"SHA1WithRSA", "SHA1WithRSA", x509.SHA1WithRSA, true},
+		{"SHA256WithRSA", "SHA256WithRSA", x509.SHA256WithRSA, true},
+		{"SHA384WithRSA", "SHA384WithRSA", x509.SHA384WithRSA, true},
+		{"SHA512WithRSA", "SHA512WithRSA", x509.SHA512WithRSA, true},
+
+		// ECDSA algorithms
+		{"ECDSAWithSHA1", "ECDSAWithSHA1", x509.ECDSAWithSHA1, true},
+		{"ECDSAWithSHA256", "ECDSAWithSHA256", x509.ECDSAWithSHA256, true},
+		{"ECDSAWithSHA384", "ECDSAWithSHA384", x509.ECDSAWithSHA384, true},
+		{"ECDSAWithSHA512", "ECDSAWithSHA512", x509.ECDSAWithSHA512, true},
+
+		// Case variations
+		{"lowercase", "sha256withrsa", x509.SHA256WithRSA, true},
+		{"uppercase", "SHA256WITHRSA", x509.SHA256WithRSA, true},
+		{"mixed case", "Sha256WithRsa", x509.SHA256WithRSA, true},
+
+		// With whitespace
+		{"leading space", " SHA256WithRSA", x509.SHA256WithRSA, true},
+		{"trailing space", "SHA256WithRSA ", x509.SHA256WithRSA, true},
+		{"both spaces", " SHA256WithRSA ", x509.SHA256WithRSA, true},
+
+		// Invalid inputs
+		{"unknown algorithm", "UnknownAlgo", x509.UnknownSignatureAlgorithm, false},
+		{"empty string", "", x509.UnknownSignatureAlgorithm, false},
+		{"gibberish", "not-a-valid-algorithm", x509.UnknownSignatureAlgorithm, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			algo, ok := parseSignatureAlgorithm(tt.input)
+			if ok != tt.wantOk {
+				t.Errorf("parseSignatureAlgorithm(%q) ok = %v, want %v", tt.input, ok, tt.wantOk)
+			}
+			if algo != tt.expected {
+				t.Errorf("parseSignatureAlgorithm(%q) = %v, want %v", tt.input, algo, tt.expected)
 			}
 		})
 	}

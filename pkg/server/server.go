@@ -887,11 +887,14 @@ func (s *Server) deepHealthHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set HTTP status code based on service status
-	statusCode := http.StatusOK
-	if serviceStatus == "unhealthy" {
+	var statusCode int
+	switch serviceStatus {
+	case "unhealthy":
 		statusCode = http.StatusServiceUnavailable
-	} else if serviceStatus == "degraded" {
+	case "degraded":
 		statusCode = http.StatusOK // Still return 200 for degraded, but with status in body
+	default:
+		statusCode = http.StatusOK
 	}
 
 	w.Header().Set("Content-Type", "application/json")
