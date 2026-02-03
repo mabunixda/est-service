@@ -131,13 +131,14 @@ func TestParseBackendError_NotFound(t *testing.T) {
 
 func TestParseBackendError_ServiceUnavailable(t *testing.T) {
 	tests := []struct {
-		name   string
-		errMsg string
+		name               string
+		errMsg             string
+		expectedRetryAfter int
 	}{
-		{"connection refused", "connection refused"},
-		{"connection reset", "connection reset by peer"},
-		{"no such host", "no such host"},
-		{"timeout", "request timeout"},
+		{"connection refused", "connection refused", 30},
+		{"connection reset", "connection reset by peer", 30},
+		{"no such host", "no such host", 30},
+		{"timeout", "request timeout", 30},
 	}
 
 	for _, tt := range tests {
@@ -156,6 +157,40 @@ func TestParseBackendError_ServiceUnavailable(t *testing.T) {
 			}
 			if result.Details != "Unable to connect to PKI backend" {
 				t.Errorf("Expected specific details message, got: %s", result.Details)
+			}
+			if result.RetryAfter != tt.expectedRetryAfter {
+				t.Errorf("Expected RetryAfter %d, got %d", tt.expectedRetryAfter, result.RetryAfter)
+			}
+		})
+	}
+}
+
+func TestParseBackendError_ServiceUnavailable_Sealed(t *testing.T) {
+	tests := []struct {
+		name               string
+		errMsg             string
+		expectedRetryAfter int
+	}{
+		{"sealed", "Vault is sealed", 120},
+		{"standby", "Vault is in standby mode", 120},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := errors.New(tt.errMsg)
+			result := ParseBackendError(err)
+
+			if result == nil {
+				t.Fatal("Expected non-nil BackendError")
+			}
+			if result.StatusCode != http.StatusServiceUnavailable {
+				t.Errorf("Expected status %d, got %d", http.StatusServiceUnavailable, result.StatusCode)
+			}
+			if !strings.Contains(result.Message, "unavailable") {
+				t.Errorf("Expected message to contain 'unavailable', got: %s", result.Message)
+			}
+			if result.RetryAfter != tt.expectedRetryAfter {
+				t.Errorf("Expected RetryAfter %d seconds for %s, got %d", tt.expectedRetryAfter, tt.name, result.RetryAfter)
 			}
 		})
 	}
@@ -276,8 +311,8 @@ func TestSendBackendError_ServiceUnavailable(t *testing.T) {
 	if !strings.Contains(body, "unavailable") {
 		t.Errorf("Expected body to contain 'unavailable', got: %s", body)
 	}
-	if !strings.Contains(body, "try again later") {
-		t.Errorf("Expected body to contain 'try again later', got: %s", body)
+	if !strings.Contains(body, "retry after") {
+		t.Errorf("Expected body to contain 'retry after', got: %s", body)
 	}
 }
 
@@ -337,5 +372,80 @@ func TestBackendError_AllFieldsSet(t *testing.T) {
 	// Verify details extraction worked
 	if result.Details != "permission denied for role" {
 		t.Errorf("Expected details 'permission denied for role', got: %s", result.Details)
+	}
+}
+
+func TestSendBackendError_ServiceUnavailable_IncludesRetryAfter(t *testing.T) {
+	err := errors.New("connection refused")
+	w := httptest.NewRecorder()
+
+	SendBackendError(w, err, "certificate enrollment")
+
+	// Verify HTTP status code
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("Expected status %d, got %d", http.StatusServiceUnavailable, w.Code)
+	}
+
+	// Verify Retry-After header is present
+	retryAfter := w.Header().Get("Retry-After")
+	if retryAfter == "" {
+		t.Error("Expected Retry-After header to be set")
+	}
+
+	// Verify Retry-After value is correct
+	if retryAfter != "30" {
+		t.Errorf("Expected Retry-After: 30, got: %s", retryAfter)
+	}
+
+	// Verify error message mentions retry time
+	body := w.Body.String()
+	if !strings.Contains(body, "30 seconds") {
+		t.Errorf("Expected error message to mention retry time, got: %s", body)
+	}
+}
+
+func TestSendBackendError_ServiceUnavailable_Sealed_LongerRetry(t *testing.T) {
+	err := errors.New("Vault is sealed")
+	w := httptest.NewRecorder()
+
+	SendBackendError(w, err, "certificate enrollment")
+
+	// Verify Retry-After is 120 seconds for sealed state
+	retryAfter := w.Header().Get("Retry-After")
+	if retryAfter != "120" {
+		t.Errorf("Expected Retry-After: 120 for sealed Vault, got: %s", retryAfter)
+	}
+
+	// Verify error message mentions retry time
+	body := w.Body.String()
+	if !strings.Contains(body, "120 seconds") {
+		t.Errorf("Expected error message to mention 120 second retry time, got: %s", body)
+	}
+}
+
+func TestSendBackendError_OtherErrors_NoRetryAfter(t *testing.T) {
+	tests := []struct {
+		name   string
+		errMsg string
+	}{
+		{"permission denied", "permission denied"},
+		{"not found", "mount not found"},
+		{"bad request", "invalid data"},
+		{"backend error", "code: 500"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := errors.New(tt.errMsg)
+			w := httptest.NewRecorder()
+
+			SendBackendError(w, err, "operation")
+
+			// Verify Retry-After header is NOT set for non-503 errors
+			retryAfter := w.Header().Get("Retry-After")
+			if retryAfter != "" {
+				t.Errorf("Expected no Retry-After header for %s, got: %s", tt.name, retryAfter)
+			}
+		})
 	}
 }

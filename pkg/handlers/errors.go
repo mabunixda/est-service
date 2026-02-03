@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
@@ -11,6 +12,7 @@ type BackendError struct {
 	StatusCode int
 	Message    string
 	Details    string
+	RetryAfter int // seconds until client should retry (0 = not set)
 }
 
 // ParseBackendError analyzes an error from the backend and returns appropriate HTTP status code and message
@@ -65,7 +67,7 @@ func ParseBackendError(err error) *BackendError {
 		}
 	}
 
-	// Service unavailable / connection issues
+	// Service unavailable / connection issues (transient failures)
 	if strings.Contains(errLower, "connection refused") ||
 		strings.Contains(errLower, "connection reset") ||
 		strings.Contains(errLower, "no such host") ||
@@ -74,6 +76,18 @@ func ParseBackendError(err error) *BackendError {
 			StatusCode: http.StatusServiceUnavailable,
 			Message:    "Backend service unavailable",
 			Details:    "Unable to connect to PKI backend",
+			RetryAfter: 30, // Recommend retry after 30 seconds
+		}
+	}
+
+	// Backend sealed or in standby mode (transient, longer retry)
+	if strings.Contains(errLower, "sealed") ||
+		strings.Contains(errLower, "standby") {
+		return &BackendError{
+			StatusCode: http.StatusServiceUnavailable,
+			Message:    "Backend service temporarily unavailable",
+			Details:    extractVaultError(errStr),
+			RetryAfter: 120, // Sealed/standby may take longer - retry after 2 minutes
 		}
 	}
 
@@ -123,6 +137,11 @@ func extractVaultError(errStr string) string {
 func SendBackendError(w http.ResponseWriter, err error, operation string) {
 	backendErr := ParseBackendError(err)
 
+	// Set Retry-After header for service unavailable errors (RFC 7030 best practice)
+	if backendErr.RetryAfter > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(backendErr.RetryAfter))
+	}
+
 	// Format user-friendly error message
 	var errorMsg string
 	switch backendErr.StatusCode {
@@ -130,8 +149,13 @@ func SendBackendError(w http.ResponseWriter, err error, operation string) {
 		errorMsg = fmt.Sprintf("%s. The EST service may lack permissions to sign certificates with the configured PKI role.",
 			backendErr.Message)
 	case http.StatusServiceUnavailable:
-		errorMsg = fmt.Sprintf("%s. Please try again later or contact your administrator.",
-			backendErr.Message)
+		if backendErr.RetryAfter > 0 {
+			errorMsg = fmt.Sprintf("%s. Please retry after %d seconds.",
+				backendErr.Message, backendErr.RetryAfter)
+		} else {
+			errorMsg = fmt.Sprintf("%s. Please try again later or contact your administrator.",
+				backendErr.Message)
+		}
 	case http.StatusBadGateway:
 		errorMsg = fmt.Sprintf("%s during %s.",
 			backendErr.Message, operation)
