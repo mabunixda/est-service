@@ -175,6 +175,29 @@ func (h *SimpleReenrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 			http.Error(w, "CSR public key must match client certificate", http.StatusBadRequest)
 			return
 		}
+
+		// RFC 7030 Section 4.2.2: Validate Subject and SubjectAltName match
+		// unless ChangeSubjectName attribute is present
+		if err := est.ValidateReenrollmentSubject(csr, clientCert); err != nil {
+			h.logger.Error("CSR subject/SAN validation failed",
+				"error", err,
+				"csr_subject", csr.Subject.String(),
+				"cert_subject", clientCert.Subject.String())
+			if h.telemetry != nil {
+				h.telemetry.RecordCertificateRejected(ctx, "reenroll", "subject_mismatch")
+			}
+			if h.auditLog != nil {
+				h.auditLog.Info("audit.reenroll",
+					"request_id", observability.RequestIDFromContext(ctx),
+					"action", "reenroll",
+					"result", "denied",
+					"reason", "subject_san_mismatch",
+					"remote_addr", r.RemoteAddr,
+					"user_agent", r.UserAgent())
+			}
+			http.Error(w, "CSR Subject and SubjectAltName must match existing certificate (or include ChangeSubjectName attribute)", http.StatusBadRequest)
+			return
+		}
 	}
 
 	enrollReq := &EnrollmentRequest{

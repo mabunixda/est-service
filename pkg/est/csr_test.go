@@ -335,3 +335,344 @@ func TestEmptyCommonName(t *testing.T) {
 		t.Error("CSR should have at least one DNS SAN when CN is empty")
 	}
 }
+
+func TestValidateReenrollmentSubject(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("Failed to generate key: %v", err)
+	}
+
+	tests := []struct {
+		name            string
+		csrSubject      pkix.Name
+		certSubject     pkix.Name
+		csrDNSNames     []string
+		certDNSNames    []string
+		csrEmails       []string
+		certEmails      []string
+		csrIPs          []net.IP
+		certIPs         []net.IP
+		includeChangeSN bool
+		expectError     bool
+		errorContains   string
+	}{
+		{
+			name: "identical subject and SANs - should pass",
+			csrSubject: pkix.Name{
+				CommonName:   "test.example.com",
+				Organization: []string{"Test Org"},
+			},
+			certSubject: pkix.Name{
+				CommonName:   "test.example.com",
+				Organization: []string{"Test Org"},
+			},
+			csrDNSNames:  []string{"alt1.example.com", "alt2.example.com"},
+			certDNSNames: []string{"alt1.example.com", "alt2.example.com"},
+			expectError:  false,
+		},
+		{
+			name: "different subject without ChangeSubjectName - should fail",
+			csrSubject: pkix.Name{
+				CommonName:   "new.example.com",
+				Organization: []string{"New Org"},
+			},
+			certSubject: pkix.Name{
+				CommonName:   "old.example.com",
+				Organization: []string{"Old Org"},
+			},
+			expectError:   true,
+			errorContains: "does not match existing certificate Subject",
+		},
+		{
+			name: "different subject with ChangeSubjectName - should pass",
+			csrSubject: pkix.Name{
+				CommonName:   "new.example.com",
+				Organization: []string{"New Org"},
+			},
+			certSubject: pkix.Name{
+				CommonName:   "old.example.com",
+				Organization: []string{"Old Org"},
+			},
+			includeChangeSN: true,
+			expectError:     false,
+		},
+		{
+			name: "different DNS names without ChangeSubjectName - should fail",
+			csrSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			certSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			csrDNSNames:   []string{"new.example.com"},
+			certDNSNames:  []string{"old.example.com"},
+			expectError:   true,
+			errorContains: "DNS names",
+		},
+		{
+			name: "DNS names in different order - should pass",
+			csrSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			certSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			csrDNSNames:  []string{"alt2.example.com", "alt1.example.com"},
+			certDNSNames: []string{"alt1.example.com", "alt2.example.com"},
+			expectError:  false,
+		},
+		{
+			name: "different email addresses - should fail",
+			csrSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			certSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			csrEmails:     []string{"new@example.com"},
+			certEmails:    []string{"old@example.com"},
+			expectError:   true,
+			errorContains: "email addresses",
+		},
+		{
+			name: "email addresses in different order - should pass",
+			csrSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			certSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			csrEmails:   []string{"b@example.com", "a@example.com"},
+			certEmails:  []string{"a@example.com", "b@example.com"},
+			expectError: false,
+		},
+		{
+			name: "different IP addresses - should fail",
+			csrSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			certSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			csrIPs:        []net.IP{net.ParseIP("192.168.1.1")},
+			certIPs:       []net.IP{net.ParseIP("192.168.1.2")},
+			expectError:   true,
+			errorContains: "IP addresses",
+		},
+		{
+			name: "IP addresses in different order - should pass",
+			csrSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			certSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			csrIPs:      []net.IP{net.ParseIP("192.168.1.2"), net.ParseIP("192.168.1.1")},
+			certIPs:     []net.IP{net.ParseIP("192.168.1.1"), net.ParseIP("192.168.1.2")},
+			expectError: false,
+		},
+		{
+			name: "empty SANs on both - should pass",
+			csrSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			certSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			expectError: false,
+		},
+		{
+			name: "complex matching SANs - should pass",
+			csrSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			certSubject: pkix.Name{
+				CommonName: "test.example.com",
+			},
+			csrDNSNames:  []string{"alt1.example.com", "alt2.example.com"},
+			certDNSNames: []string{"alt1.example.com", "alt2.example.com"},
+			csrEmails:    []string{"admin@example.com"},
+			certEmails:   []string{"admin@example.com"},
+			csrIPs:       []net.IP{net.ParseIP("192.168.1.1")},
+			certIPs:      []net.IP{net.ParseIP("192.168.1.1")},
+			expectError:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create CSR template
+			csrTemplate := &x509.CertificateRequest{
+				Subject:        tt.csrSubject,
+				DNSNames:       tt.csrDNSNames,
+				EmailAddresses: tt.csrEmails,
+				IPAddresses:    tt.csrIPs,
+			}
+
+			// Add ChangeSubjectName attribute if requested
+			if tt.includeChangeSN {
+				csrTemplate.Attributes = []pkix.AttributeTypeAndValueSET{
+					{
+						Type: oidChangeSubjectName,
+					},
+				}
+			}
+
+			// Create CSR
+			csrDER, err := x509.CreateCertificateRequest(rand.Reader, csrTemplate, privateKey)
+			if err != nil {
+				t.Fatalf("Failed to create CSR: %v", err)
+			}
+			csr, err := x509.ParseCertificateRequest(csrDER)
+			if err != nil {
+				t.Fatalf("Failed to parse CSR: %v", err)
+			}
+
+			// Create certificate template
+			certTemplate := &x509.Certificate{
+				SerialNumber:   big.NewInt(1),
+				Subject:        tt.certSubject,
+				NotBefore:      time.Now(),
+				NotAfter:       time.Now().Add(24 * time.Hour),
+				DNSNames:       tt.certDNSNames,
+				EmailAddresses: tt.certEmails,
+				IPAddresses:    tt.certIPs,
+			}
+
+			// Create certificate
+			certDER, err := x509.CreateCertificate(rand.Reader, certTemplate, certTemplate, &privateKey.PublicKey, privateKey)
+			if err != nil {
+				t.Fatalf("Failed to create certificate: %v", err)
+			}
+			cert, err := x509.ParseCertificate(certDER)
+			if err != nil {
+				t.Fatalf("Failed to parse certificate: %v", err)
+			}
+
+			// Validate
+			err = ValidateReenrollmentSubject(csr, cert)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("ValidateReenrollmentSubject() should have returned an error")
+				} else if tt.errorContains != "" && !strings.Contains(err.Error(), tt.errorContains) {
+					t.Errorf("Error message should contain %q, got: %v", tt.errorContains, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("ValidateReenrollmentSubject() unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+func TestStringSlicesEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        []string
+		b        []string
+		expected bool
+	}{
+		{
+			name:     "identical slices",
+			a:        []string{"a", "b", "c"},
+			b:        []string{"a", "b", "c"},
+			expected: true,
+		},
+		{
+			name:     "different order",
+			a:        []string{"c", "a", "b"},
+			b:        []string{"a", "b", "c"},
+			expected: true,
+		},
+		{
+			name:     "different elements",
+			a:        []string{"a", "b"},
+			b:        []string{"a", "c"},
+			expected: false,
+		},
+		{
+			name:     "different lengths",
+			a:        []string{"a", "b"},
+			b:        []string{"a", "b", "c"},
+			expected: false,
+		},
+		{
+			name:     "empty slices",
+			a:        []string{},
+			b:        []string{},
+			expected: true,
+		},
+		{
+			name:     "nil vs empty",
+			a:        nil,
+			b:        []string{},
+			expected: true,
+		},
+		{
+			name:     "duplicate elements",
+			a:        []string{"a", "a", "b"},
+			b:        []string{"a", "b"},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stringSlicesEqual(tt.a, tt.b)
+			if result != tt.expected {
+				t.Errorf("stringSlicesEqual(%v, %v) = %v, want %v", tt.a, tt.b, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIPSlicesEqual(t *testing.T) {
+	tests := []struct {
+		name     string
+		a        []net.IP
+		b        []net.IP
+		expected bool
+	}{
+		{
+			name:     "identical IPs",
+			a:        []net.IP{net.ParseIP("192.168.1.1"), net.ParseIP("10.0.0.1")},
+			b:        []net.IP{net.ParseIP("192.168.1.1"), net.ParseIP("10.0.0.1")},
+			expected: true,
+		},
+		{
+			name:     "different order",
+			a:        []net.IP{net.ParseIP("10.0.0.1"), net.ParseIP("192.168.1.1")},
+			b:        []net.IP{net.ParseIP("192.168.1.1"), net.ParseIP("10.0.0.1")},
+			expected: true,
+		},
+		{
+			name:     "different IPs",
+			a:        []net.IP{net.ParseIP("192.168.1.1")},
+			b:        []net.IP{net.ParseIP("192.168.1.2")},
+			expected: false,
+		},
+		{
+			name:     "empty slices",
+			a:        []net.IP{},
+			b:        []net.IP{},
+			expected: true,
+		},
+		{
+			name:     "IPv4 vs IPv6",
+			a:        []net.IP{net.ParseIP("192.168.1.1")},
+			b:        []net.IP{net.ParseIP("::1")},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ipSlicesEqual(tt.a, tt.b)
+			if result != tt.expected {
+				t.Errorf("ipSlicesEqual(%v, %v) = %v, want %v", tt.a, tt.b, result, tt.expected)
+			}
+		})
+	}
+}

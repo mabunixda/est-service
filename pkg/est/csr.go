@@ -2,11 +2,14 @@ package est
 
 import (
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/base64"
 	"encoding/pem"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -178,4 +181,157 @@ func ExtractTLSClientCertificate(r *http.Request) (*x509.Certificate, error) {
 	// Return the first certificate (the client's certificate)
 	// The rest of the chain is in PeerCertificates[1:]
 	return r.TLS.PeerCertificates[0], nil
+}
+
+// OID for ChangeSubjectName attribute per RFC 6402 Section 6
+var oidChangeSubjectName = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 9, 8}
+
+// ValidateReenrollmentSubject validates that the CSR Subject and SubjectAltName match
+// the existing certificate per RFC 7030 Section 4.2.2, unless the ChangeSubjectName
+// attribute is present in the CSR.
+//
+// RFC 7030 Section 4.2.2 states:
+// "The request Subject field and SubjectAltName extension MUST be identical to the
+// corresponding fields in the certificate being renewed/rekeyed. The ChangeSubjectName
+// attribute, as defined in [RFC6402], MAY be included in the CSR to request that these
+// fields be changed in the new certificate."
+func ValidateReenrollmentSubject(csr *x509.CertificateRequest, existingCert *x509.Certificate) error {
+	// Check if ChangeSubjectName attribute is present in CSR
+	hasChangeSubjectName := false
+	for _, attr := range csr.Attributes {
+		if attr.Type.Equal(oidChangeSubjectName) {
+			hasChangeSubjectName = true
+			break
+		}
+	}
+
+	// If ChangeSubjectName is present, allow subject changes
+	if hasChangeSubjectName {
+		return nil
+	}
+
+	// Validate Subject field matches
+	if csr.Subject.String() != existingCert.Subject.String() {
+		return fmt.Errorf("CSR Subject (%s) does not match existing certificate Subject (%s); include ChangeSubjectName attribute to request subject changes",
+			csr.Subject.String(), existingCert.Subject.String())
+	}
+
+	// Validate SubjectAltName extension matches
+	if err := validateSubjectAltNameMatch(csr, existingCert); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateSubjectAltNameMatch checks that the SubjectAltName extension in the CSR
+// matches the SubjectAltName in the existing certificate
+func validateSubjectAltNameMatch(csr *x509.CertificateRequest, cert *x509.Certificate) error {
+	// Extract SAN from CSR and certificate
+	csrDNSNames := csr.DNSNames
+	csrEmailAddresses := csr.EmailAddresses
+	csrIPAddresses := csr.IPAddresses
+	csrURIs := csr.URIs
+
+	certDNSNames := cert.DNSNames
+	certEmailAddresses := cert.EmailAddresses
+	certIPAddresses := cert.IPAddresses
+	certURIs := cert.URIs
+
+	// Compare DNS names
+	if !stringSlicesEqual(csrDNSNames, certDNSNames) {
+		return fmt.Errorf("CSR DNS names (%v) do not match certificate DNS names (%v)",
+			csrDNSNames, certDNSNames)
+	}
+
+	// Compare email addresses
+	if !stringSlicesEqual(csrEmailAddresses, certEmailAddresses) {
+		return fmt.Errorf("CSR email addresses (%v) do not match certificate email addresses (%v)",
+			csrEmailAddresses, certEmailAddresses)
+	}
+
+	// Compare IP addresses
+	if !ipSlicesEqual(csrIPAddresses, certIPAddresses) {
+		return fmt.Errorf("CSR IP addresses (%v) do not match certificate IP addresses (%v)",
+			csrIPAddresses, certIPAddresses)
+	}
+
+	// Compare URIs
+	if !uriSlicesEqual(csrURIs, certURIs) {
+		return fmt.Errorf("CSR URIs (%v) do not match certificate URIs (%v)",
+			csrURIs, certURIs)
+	}
+
+	return nil
+}
+
+// stringSlicesEqual checks if two string slices contain the same elements (order-independent)
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Create maps to count occurrences
+	aMap := make(map[string]int)
+	bMap := make(map[string]int)
+
+	for _, s := range a {
+		aMap[s]++
+	}
+	for _, s := range b {
+		bMap[s]++
+	}
+
+	// Compare maps
+	if len(aMap) != len(bMap) {
+		return false
+	}
+
+	for k, v := range aMap {
+		if bMap[k] != v {
+			return false
+		}
+	}
+
+	return true
+}
+
+// ipSlicesEqual checks if two IP address slices contain the same elements (order-independent)
+func ipSlicesEqual(a, b []net.IP) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Convert to strings for comparison
+	aStrs := make([]string, len(a))
+	bStrs := make([]string, len(b))
+
+	for i, ip := range a {
+		aStrs[i] = ip.String()
+	}
+	for i, ip := range b {
+		bStrs[i] = ip.String()
+	}
+
+	return stringSlicesEqual(aStrs, bStrs)
+}
+
+// uriSlicesEqual checks if two URI slices contain the same elements (order-independent)
+func uriSlicesEqual(a, b []*url.URL) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	// Convert to strings for comparison
+	aStrs := make([]string, len(a))
+	bStrs := make([]string, len(b))
+
+	for i, u := range a {
+		aStrs[i] = u.String()
+	}
+	for i, u := range b {
+		bStrs[i] = u.String()
+	}
+
+	return stringSlicesEqual(aStrs, bStrs)
 }

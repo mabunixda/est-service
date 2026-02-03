@@ -303,6 +303,7 @@ func generateTestClientCert(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey)
 			CommonName:   "test-client.example.com",
 			Organization: []string{"Test Org"},
 		},
+		DNSNames:              []string{"test-client.example.com"}, // Must match CSR SANs for RFC 7030
 		NotBefore:             time.Now().Add(-24 * time.Hour),
 		NotAfter:              time.Now().Add(365 * 24 * time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
@@ -342,4 +343,122 @@ func generateTestCSRWithKey(t *testing.T, priv *ecdsa.PrivateKey) []byte {
 
 	// Return base64-encoded DER
 	return []byte(base64.StdEncoding.EncodeToString(csrDER))
+}
+
+// Helper: generate a CSR with custom subject/SANs
+func generateTestCSRWithSubject(t *testing.T, priv *ecdsa.PrivateKey, subject pkix.Name, dnsNames []string) []byte {
+	t.Helper()
+
+	template := x509.CertificateRequest{
+		Subject:  subject,
+		DNSNames: dnsNames,
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, &template, priv)
+	if err != nil {
+		t.Fatalf("Failed to create CSR: %v", err)
+	}
+
+	// Return base64-encoded DER
+	return []byte(base64.StdEncoding.EncodeToString(csrDER))
+}
+
+// TestSimpleReenrollWorkflow_SubjectMismatch tests RFC 7030 Subject validation
+func TestSimpleReenrollWorkflow_SubjectMismatch(t *testing.T) {
+	// Generate existing client certificate
+	clientCert, clientKey := generateTestClientCert(t)
+
+	// Create a CSR with DIFFERENT subject (should fail RFC 7030 validation)
+	csrDER := generateTestCSRWithSubject(t, clientKey,
+		pkix.Name{
+			CommonName:   "different.example.com", // Different from cert
+			Organization: []string{"Different Org"},
+		},
+		[]string{"different.example.com"},
+	)
+
+	mock := &backend.MockBackend{
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+			return "cert-token-123", nil
+		},
+	}
+
+	authMgr := auth.NewManager(mock, &auth.Config{
+		CertEnabled:   true,
+		CertMountPath: "cert",
+	}, slog.Default())
+
+	config := &EnrollmentConfig{
+		DefaultMount: "pki",
+		DefaultPolicy: LabelPolicy{
+			Type:  "role",
+			Value: "est",
+		},
+	}
+
+	handler := NewSimpleReenrollHandler(mock, authMgr, config, slog.Default(), &mockTelemetry{})
+
+	req := httptest.NewRequest("POST", "/.well-known/est/simplereenroll", bytes.NewReader(csrDER))
+	req.Header.Set("Content-Type", "application/pkcs10")
+	req.TLS = &tls.ConnectionState{
+		PeerCertificates: []*x509.Certificate{clientCert},
+	}
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Should reject with 400 Bad Request due to Subject mismatch
+	if w.Code != 400 {
+		t.Errorf("Expected status 400 for subject mismatch, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestSimpleReenrollWorkflow_SANMismatch tests RFC 7030 SubjectAltName validation
+func TestSimpleReenrollWorkflow_SANMismatch(t *testing.T) {
+	// Generate existing client certificate
+	clientCert, clientKey := generateTestClientCert(t)
+
+	// Create a CSR with same subject but DIFFERENT SANs (should fail RFC 7030 validation)
+	csrDER := generateTestCSRWithSubject(t, clientKey,
+		pkix.Name{
+			CommonName:   "test-client.example.com", // Same as cert
+			Organization: []string{"Test Org"},
+		},
+		[]string{"different-san.example.com"}, // Different SANs
+	)
+
+	mock := &backend.MockBackend{
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+			return "cert-token-123", nil
+		},
+	}
+
+	authMgr := auth.NewManager(mock, &auth.Config{
+		CertEnabled:   true,
+		CertMountPath: "cert",
+	}, slog.Default())
+
+	config := &EnrollmentConfig{
+		DefaultMount: "pki",
+		DefaultPolicy: LabelPolicy{
+			Type:  "role",
+			Value: "est",
+		},
+	}
+
+	handler := NewSimpleReenrollHandler(mock, authMgr, config, slog.Default(), &mockTelemetry{})
+
+	req := httptest.NewRequest("POST", "/.well-known/est/simplereenroll", bytes.NewReader(csrDER))
+	req.Header.Set("Content-Type", "application/pkcs10")
+	req.TLS = &tls.ConnectionState{
+		PeerCertificates: []*x509.Certificate{clientCert},
+	}
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Should reject with 400 Bad Request due to SAN mismatch
+	if w.Code != 400 {
+		t.Errorf("Expected status 400 for SAN mismatch, got %d: %s", w.Code, w.Body.String())
+	}
 }
