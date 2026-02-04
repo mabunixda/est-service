@@ -34,9 +34,11 @@ type Config struct {
 	AppRoleMountPath string
 
 	// Certificate authentication
-	CertEnabled   bool
-	CertMountPath string
-	CertRole      string
+	CertEnabled           bool
+	CertMountPath         string
+	CertRole              string
+	CertEntityAliasPrefix string // Prefix for entity alias (default: "est-cert-")
+	CertTokenTTL          string // TTL for created tokens (default: "24h")
 
 	// Token authentication (Bearer)
 	TokenEnabled bool
@@ -183,7 +185,7 @@ func (m *Manager) authenticateCert(ctx context.Context, r *http.Request) *Result
 	m.logger.Debug("Client certificate found in TLS connection")
 
 	// Authenticate with backend
-	token, err := m.backend.AuthenticateCert(ctx, m.config.CertMountPath, r.TLS, m.config.CertRole)
+	token, err := m.backend.AuthenticateCert(ctx, m.config.CertMountPath, r.TLS, m.config.CertRole, m.config.CertEntityAliasPrefix, m.config.CertTokenTTL)
 	if err != nil {
 		m.logger.Debug("Certificate authentication failed",
 			"error", err)
@@ -231,6 +233,10 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 	// Split username:password
 	parts := strings.SplitN(string(decoded), ":", 2)
 	if len(parts) != 2 {
+		// Scrub decoded credentials before returning
+		for i := range decoded {
+			decoded[i] = 0
+		}
 		return &Result{
 			Authenticated: false,
 			Error:         fmt.Errorf("invalid basic auth format"),
@@ -256,6 +262,9 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 		triedUserpass = true
 		token, err = m.backend.AuthenticateUserpass(ctx, m.config.UserpassMountPath, username, password)
 		if err == nil {
+			// Success - scrub credentials before returning
+			scrubCredentials(decoded, parts)
+
 			m.logger.Info("Userpass authentication successful",
 				"request_id", observability.RequestIDFromContext(ctx))
 			return &Result{
@@ -273,6 +282,9 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 		triedLDAP = true
 		token, err = m.backend.AuthenticateLDAP(ctx, m.config.LDAPMountPath, username, password)
 		if err == nil {
+			// Success - scrub credentials before returning
+			scrubCredentials(decoded, parts)
+
 			m.logger.Info("LDAP authentication successful",
 				"request_id", observability.RequestIDFromContext(ctx))
 			return &Result{
@@ -289,6 +301,9 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 		triedAppRole = true
 		token, err = m.backend.AuthenticateAppRole(ctx, m.config.AppRoleMountPath, username, password)
 		if err == nil {
+			// Success - scrub credentials before returning
+			scrubCredentials(decoded, parts)
+
 			m.logger.Info("AppRole authentication successful",
 				"request_id", observability.RequestIDFromContext(ctx))
 			return &Result{
@@ -301,28 +316,8 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 		appRoleError = err
 	}
 
-	// SECURITY: Scrub password from memory immediately after use
-	// This reduces the window of exposure, though Go's GC may have already created copies.
-	// We overwrite both the string data and the parts slice to be thorough.
-	if len(password) > 0 {
-		// Convert password string to byte slice for overwriting
-		// Note: In Go, strings are immutable, so we can't directly overwrite them.
-		// However, we can overwrite the underlying byte slice if we have access to it.
-		// The best we can do is overwrite the parts slice and clear references.
-
-		// Overwrite the decoded byte slice (contains "username:password")
-		for i := range decoded {
-			decoded[i] = 0
-		}
-
-		// Clear the parts slice
-		for i := range parts {
-			parts[i] = ""
-		}
-
-		// Clear password variable reference (best effort - strings are immutable in Go)
-		_ = password // Mark as intentionally unused after this point
-	}
+	// All authentication attempts failed - scrub credentials
+	scrubCredentials(decoded, parts)
 
 	if triedUserpass && userpassError != nil {
 		m.logger.Debug("Userpass authentication failed",
@@ -346,6 +341,22 @@ func (m *Manager) authenticateBasic(ctx context.Context, r *http.Request) *Resul
 	return &Result{
 		Authenticated: false,
 		Error:         fmt.Errorf("no basic authentication methods enabled"),
+	}
+}
+
+// scrubCredentials securely zeroes out credential data from memory
+// This is called after authentication completes (success or failure)
+func scrubCredentials(decoded []byte, parts []string) {
+	// Overwrite the decoded byte slice (contains "username:password")
+	for i := range decoded {
+		decoded[i] = 0
+	}
+
+	// Clear the parts slice (contains username and password as separate strings)
+	// Note: Go strings are immutable, so we can't overwrite the string data itself,
+	// but we can clear the slice references to allow GC to collect them
+	for i := range parts {
+		parts[i] = ""
 	}
 }
 

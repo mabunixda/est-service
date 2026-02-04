@@ -55,15 +55,19 @@ type BackendConfig struct {
 	TokenRenewalInterval time.Duration `yaml:"token_renewal_interval"` // Token renewal interval (default: 15m)
 	Namespace            string        `yaml:"namespace"`              // Namespace (Enterprise feature)
 	TLSSkipVerify        bool          `yaml:"tls_skip_verify"`        // Skip TLS verification (not recommended)
+	TLSServerName        string        `yaml:"tls_server_name"`        // SNI host for TLS connection
 	CACert               string        `yaml:"ca_cert"`                // CA certificate for TLS verification
+	CAPath               string        `yaml:"ca_path"`                // CA certificate directory for TLS verification
 	ClientCert           string        `yaml:"client_cert"`            // Client certificate for mTLS to backend
 	ClientKey            string        `yaml:"client_key"`             // Client key for mTLS to backend
-	Timeout              time.Duration `yaml:"timeout"`                // Request timeout
+	Timeout              time.Duration `yaml:"timeout"`                // Request timeout (default: 60s)
+	MaxRetries           int           `yaml:"max_retries"`            // Maximum number of retries for 5xx errors (default: 2)
+	MinRetryWait         time.Duration `yaml:"min_retry_wait"`         // Minimum wait time before retry (default: 1000ms)
+	MaxRetryWait         time.Duration `yaml:"max_retry_wait"`         // Maximum wait time before retry (default: 1500ms)
 }
 
 // ESTConfig configures EST protocol behavior
 type ESTConfig struct {
-	Enabled        bool                   `yaml:"enabled"`
 	DefaultMount   string                 `yaml:"default_mount"`
 	Labels         map[string]LabelConfig `yaml:"labels"`
 	DefaultPolicy  PolicyConfig           `yaml:"default_policy"`
@@ -118,10 +122,9 @@ type AppRoleAuthConfig struct {
 type CertAuthConfig struct {
 	Enabled           bool   `yaml:"enabled"`
 	MountPath         string `yaml:"mount_path"`
-	CertRole          string `yaml:"cert_role"`
-	TokenRole         string `yaml:"token_role"`          // Vault token role for creating entity-bound tokens
-	EntityAliasPrefix string `yaml:"entity_alias_prefix"` // Prefix for entity alias (e.g., "est-cert-")
-	TokenTTL          string `yaml:"token_ttl"`           // TTL for created tokens (default: "5m")
+	CertRole          string `yaml:"cert_role"`           // Role name for certificate authentication (optional)
+	EntityAliasPrefix string `yaml:"entity_alias_prefix"` // Prefix for entity alias (default: "est-cert-")
+	TokenTTL          string `yaml:"token_ttl"`           // TTL for created tokens (default: "24h")
 }
 
 // TokenAuthConfig configures token authentication
@@ -157,10 +160,10 @@ type ServerKeyGenConfig struct {
 }
 
 // ObservabilityConfig configures monitoring and logging
+// ObservabilityConfig configures monitoring and logging
 type ObservabilityConfig struct {
 	Metrics MetricsConfig `yaml:"metrics"`
 	Logging LoggingConfig `yaml:"logging"`
-	Tracing TracingConfig `yaml:"tracing"`
 	Audit   AuditConfig   `yaml:"audit"`
 }
 
@@ -178,12 +181,6 @@ type LoggingConfig struct {
 	Format string `yaml:"format"` // json, text
 	Stdout *bool  `yaml:"stdout"` // Enable stdout logging (default: true)
 	File   string `yaml:"file"`   // Optional file path for logging
-}
-
-// TracingConfig configures distributed tracing
-type TracingConfig struct {
-	Enabled  bool   `yaml:"enabled"`
-	Endpoint string `yaml:"endpoint"`
 }
 
 // AuditConfig configures structured audit logging

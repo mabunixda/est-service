@@ -5,6 +5,7 @@ import (
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,6 +13,11 @@ import (
 	"net/url"
 	"strings"
 )
+
+// ErrRequestTooLarge indicates the request body exceeds the allowed limit.
+var ErrRequestTooLarge = errors.New("request body too large")
+
+const defaultCSRMaxSizeBytes = 64 * 1024 // 64 KB default
 
 // ExtractCSRFromPKCS7 extracts a CSR from a PKCS#7 blob as required by EST.
 // EST requires CSRs to be wrapped in a PKCS#7 SignedData structure with empty signatures.
@@ -42,14 +48,18 @@ func ExtractCSRFromPKCS7(data []byte) (*x509.CertificateRequest, error) {
 // ReadCSRPayload reads the CSR from an HTTP request body.
 // EST requires the CSR to be base64-encoded DER format with application/pkcs10 content type.
 func ReadCSRPayload(r *http.Request) (*x509.CertificateRequest, error) {
-	const maxCSRSize = 10 * 1024 * 1024 // 10 MB limit
-	return ReadCSRPayloadWithLimit(r, maxCSRSize)
+	return ReadCSRPayloadWithLimit(r, defaultCSRMaxSizeBytes)
 }
 
 // ReadCSRPayloadWithLimit reads the CSR payload with a custom max size.
 func ReadCSRPayloadWithLimit(r *http.Request, maxSize int64) (*x509.CertificateRequest, error) {
 	if maxSize <= 0 {
-		maxSize = 10 * 1024 * 1024 // 10 MB limit
+		maxSize = defaultCSRMaxSizeBytes
+	}
+
+	// Fail fast on oversized Content-Length to avoid buffering large bodies
+	if r.ContentLength > maxSize && r.ContentLength != -1 {
+		return nil, ErrRequestTooLarge
 	}
 
 	limited := io.LimitedReader{R: r.Body, N: maxSize + 1}
@@ -58,7 +68,7 @@ func ReadCSRPayloadWithLimit(r *http.Request, maxSize int64) (*x509.CertificateR
 		return nil, fmt.Errorf("failed to read request body: %w", err)
 	}
 	if int64(len(body)) > maxSize {
-		return nil, fmt.Errorf("request body too large")
+		return nil, ErrRequestTooLarge
 	}
 
 	// RFC 7030: CSR should be base64-encoded
@@ -89,6 +99,10 @@ func ReadCSRPayloadWithLimit(r *http.Request, maxSize int64) (*x509.CertificateR
 // ValidateCSRSignatureAlgorithm ensures the CSR signature algorithm is allowed.
 // If allowed is empty, all algorithms are permitted.
 func ValidateCSRSignatureAlgorithm(csr *x509.CertificateRequest, allowed []string) error {
+	if isWeakSignatureAlgorithm(csr.SignatureAlgorithm) {
+		return fmt.Errorf("signature algorithm not allowed: %s", csr.SignatureAlgorithm.String())
+	}
+
 	if len(allowed) == 0 {
 		return nil
 	}
@@ -113,18 +127,12 @@ func ValidateCSRSignatureAlgorithm(csr *x509.CertificateRequest, allowed []strin
 
 func parseSignatureAlgorithm(name string) (x509.SignatureAlgorithm, bool) {
 	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "MD5WITHRSA":
-		return x509.MD5WithRSA, true
-	case "SHA1WITHRSA":
-		return x509.SHA1WithRSA, true
 	case "SHA256WITHRSA":
 		return x509.SHA256WithRSA, true
 	case "SHA384WITHRSA":
 		return x509.SHA384WithRSA, true
 	case "SHA512WITHRSA":
 		return x509.SHA512WithRSA, true
-	case "ECDSAWITHSHA1":
-		return x509.ECDSAWithSHA1, true
 	case "ECDSAWITHSHA256":
 		return x509.ECDSAWithSHA256, true
 	case "ECDSAWITHSHA384":
@@ -133,6 +141,15 @@ func parseSignatureAlgorithm(name string) (x509.SignatureAlgorithm, bool) {
 		return x509.ECDSAWithSHA512, true
 	default:
 		return x509.UnknownSignatureAlgorithm, false
+	}
+}
+
+func isWeakSignatureAlgorithm(alg x509.SignatureAlgorithm) bool {
+	switch alg {
+	case x509.MD5WithRSA, x509.SHA1WithRSA, x509.ECDSAWithSHA1:
+		return true
+	default:
+		return false
 	}
 }
 

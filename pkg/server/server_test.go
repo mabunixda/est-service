@@ -102,7 +102,7 @@ func (m *mockBackend) AuthenticateLDAP(ctx context.Context, mount, username, pas
 func (m *mockBackend) AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error) {
 	return "", nil
 }
-func (m *mockBackend) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+func (m *mockBackend) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string, entityAliasPrefix, tokenTTL string) (string, error) {
 	return "", nil
 }
 func (m *mockBackend) ValidateToken(ctx context.Context, token string) (bool, error) {
@@ -127,6 +127,18 @@ func (m *mockBackend) Type() backend.BackendType {
 
 func (m *mockBackend) Close() error {
 	return nil
+}
+
+func (m *mockBackend) CreateOrUpdateEntity(ctx context.Context, name string, metadata map[string]string, policies []string) (string, error) {
+	return "entity-id", nil
+}
+
+func (m *mockBackend) CreateOrUpdateEntityAlias(ctx context.Context, entityID, aliasName, mountAccessor string) (string, error) {
+	return "alias-id", nil
+}
+
+func (m *mockBackend) CreateTokenForEntity(ctx context.Context, entityID string, policies []string, ttl string) (string, error) {
+	return "entity-token", nil
 }
 
 // Helper to create a backend.Client with a mockBackend

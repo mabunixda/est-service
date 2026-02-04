@@ -85,8 +85,8 @@ func (c *Client) AuthenticateAppRole(ctx context.Context, mount, roleID, secretI
 }
 
 // AuthenticateCert authenticates using the certificate backend
-func (c *Client) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
-	return c.backend.AuthenticateCert(ctx, mount, connState, role)
+func (c *Client) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
+	return c.backend.AuthenticateCert(ctx, mount, connState, role, entityAliasPrefix, tokenTTL)
 }
 
 // ValidateToken validates a token by attempting to look it up
@@ -107,6 +107,21 @@ func (c *Client) RenewToken(ctx context.Context) error {
 // StartTokenRenewal starts a background goroutine that renews the token
 func (c *Client) StartTokenRenewal(ctx context.Context) {
 	c.backend.StartTokenRenewal(ctx)
+}
+
+// CreateOrUpdateEntity creates or updates an entity with the given name and metadata
+func (c *Client) CreateOrUpdateEntity(ctx context.Context, name string, metadata map[string]string, policies []string) (string, error) {
+	return c.backend.CreateOrUpdateEntity(ctx, name, metadata, policies)
+}
+
+// CreateOrUpdateEntityAlias creates or updates an entity alias
+func (c *Client) CreateOrUpdateEntityAlias(ctx context.Context, entityID, aliasName, mountAccessor string) (string, error) {
+	return c.backend.CreateOrUpdateEntityAlias(ctx, entityID, aliasName, mountAccessor)
+}
+
+// CreateTokenForEntity creates a new token bound to the specified entity
+func (c *Client) CreateTokenForEntity(ctx context.Context, entityID string, policies []string, ttl string) (string, error) {
+	return c.backend.CreateTokenForEntity(ctx, entityID, policies, ttl)
 }
 
 // GetAPIClient returns the underlying API client

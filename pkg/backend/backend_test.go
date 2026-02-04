@@ -59,7 +59,7 @@ func (m *mockBackendTest) AuthenticateAppRole(ctx context.Context, mount, roleID
 	return "", nil
 }
 
-func (m *mockBackendTest) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+func (m *mockBackendTest) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 	return "", nil
 }
 
@@ -79,6 +79,18 @@ func (m *mockBackendTest) RenewToken(ctx context.Context) error {
 }
 
 func (m *mockBackendTest) StartTokenRenewal(ctx context.Context) {}
+
+func (m *mockBackendTest) CreateOrUpdateEntity(ctx context.Context, name string, metadata map[string]string, policies []string) (string, error) {
+	return "test-entity-id", nil
+}
+
+func (m *mockBackendTest) CreateOrUpdateEntityAlias(ctx context.Context, entityID, aliasName, mountAccessor string) (string, error) {
+	return "test-alias-id", nil
+}
+
+func (m *mockBackendTest) CreateTokenForEntity(ctx context.Context, entityID string, policies []string, ttl string) (string, error) {
+	return "test-token", nil
+}
 
 func (m *mockBackendTest) GetAPIClient() *api.Client {
 	return nil
@@ -572,7 +584,7 @@ func TestClient_AuthenticateCert(t *testing.T) {
 	testConnState := &tls.ConnectionState{}
 
 	mock := &mockBackendAuthCert{
-		authFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+		authFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 			authCalled = true
 			if mount != "cert" {
 				t.Errorf("Expected mount 'cert', got '%s'", mount)
@@ -589,7 +601,7 @@ func TestClient_AuthenticateCert(t *testing.T) {
 
 	client := &Client{backend: mock}
 
-	token, err := client.AuthenticateCert(context.Background(), "cert", testConnState, "client-role")
+	token, err := client.AuthenticateCert(context.Background(), "cert", testConnState, "client-role", "est-cert-", "24h")
 	if err != nil {
 		t.Fatalf("AuthenticateCert() error = %v", err)
 	}
@@ -606,12 +618,12 @@ func TestClient_AuthenticateCert(t *testing.T) {
 // mockBackendAuthCert for testing AuthenticateCert
 type mockBackendAuthCert struct {
 	mockBackendTest
-	authFunc func(context.Context, string, *tls.ConnectionState, string) (string, error)
+	authFunc func(context.Context, string, *tls.ConnectionState, string, string, string) (string, error)
 }
 
-func (m *mockBackendAuthCert) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+func (m *mockBackendAuthCert) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 	if m.authFunc != nil {
-		return m.authFunc(ctx, mount, connState, role)
+		return m.authFunc(ctx, mount, connState, role, entityAliasPrefix, tokenTTL)
 	}
 	return "", nil
 }

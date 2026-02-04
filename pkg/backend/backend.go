@@ -38,13 +38,28 @@ type Backend interface {
 	AuthenticateUserpass(ctx context.Context, mount, username, password string) (string, error)
 	AuthenticateLDAP(ctx context.Context, mount, username, password string) (string, error)
 	AuthenticateAppRole(ctx context.Context, mount, roleID, secretID string) (string, error)
-	AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error)
+	AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error)
 	ValidateToken(ctx context.Context, token string) (bool, error)
 	LookupToken(ctx context.Context, token string) (map[string]interface{}, error)
 
 	// Token Management
 	RenewToken(ctx context.Context) error
 	StartTokenRenewal(ctx context.Context)
+
+	// Identity Management
+	// CreateOrUpdateEntity creates or updates an entity with the given name and metadata.
+	// Returns the entity ID.
+	CreateOrUpdateEntity(ctx context.Context, name string, metadata map[string]string, policies []string) (string, error)
+
+	// CreateOrUpdateEntityAlias creates or updates an entity alias for the given entity.
+	// The alias name should be unique and represent the client (e.g., cert fingerprint + CN).
+	// mount_accessor identifies the auth method (use "token" for manual token-based entities).
+	// Returns the alias ID.
+	CreateOrUpdateEntityAlias(ctx context.Context, entityID, aliasName, mountAccessor string) (string, error)
+
+	// CreateTokenForEntity creates a new token bound to the specified entity ID.
+	// This ensures the token inherits the entity's identity and policies.
+	CreateTokenForEntity(ctx context.Context, entityID string, policies []string, ttl string) (string, error)
 
 	// Client Access
 	GetAPIClient() *api.Client
@@ -71,6 +86,10 @@ type Config struct {
 	CAPath               string
 	TLSConfig            *api.TLSConfig
 	TokenRenewalInterval time.Duration // Token renewal interval (default: 15m)
+	Timeout              time.Duration // HTTP client timeout (default: 60s)
+	MaxRetries           int           // Maximum number of retries for 5xx errors (default: 2)
+	MinRetryWait         time.Duration // Minimum wait time before retry (default: 1000ms)
+	MaxRetryWait         time.Duration // Maximum wait time before retry (default: 1500ms)
 
 	// Type specifies which backend to use (vault, openbao, auto)
 	// If "auto", the type will be detected automatically

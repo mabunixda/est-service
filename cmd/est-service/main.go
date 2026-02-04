@@ -155,12 +155,14 @@ func main() {
 
 	// Configure TLS for backend connection
 	var backendTLSConfig *api.TLSConfig
-	if cfg.Backend.CACert != "" || cfg.Backend.ClientCert != "" || cfg.Backend.TLSSkipVerify {
+	if cfg.Backend.CACert != "" || cfg.Backend.CAPath != "" || cfg.Backend.ClientCert != "" || cfg.Backend.TLSSkipVerify || cfg.Backend.TLSServerName != "" {
 		backendTLSConfig = &api.TLSConfig{
-			CACert:     cfg.Backend.CACert,
-			ClientCert: cfg.Backend.ClientCert,
-			ClientKey:  cfg.Backend.ClientKey,
-			Insecure:   cfg.Backend.TLSSkipVerify,
+			CACert:        cfg.Backend.CACert,
+			CAPath:        cfg.Backend.CAPath,
+			ClientCert:    cfg.Backend.ClientCert,
+			ClientKey:     cfg.Backend.ClientKey,
+			TLSServerName: cfg.Backend.TLSServerName,
+			Insecure:      cfg.Backend.TLSSkipVerify,
 		}
 	}
 
@@ -170,6 +172,10 @@ func main() {
 		Namespace:            cfg.Backend.Namespace,
 		TLSConfig:            backendTLSConfig,
 		TokenRenewalInterval: cfg.Backend.TokenRenewalInterval,
+		Timeout:              cfg.Backend.Timeout,
+		MaxRetries:           cfg.Backend.MaxRetries,
+		MinRetryWait:         cfg.Backend.MinRetryWait,
+		MaxRetryWait:         cfg.Backend.MaxRetryWait,
 		Type:                 backend.BackendType(cfg.Backend.Type), // Pass configured type (or empty for auto-detect)
 	}
 	backendClient, err := backend.NewClient(ctx, backendCfg, logger)
@@ -180,16 +186,18 @@ func main() {
 
 	// Configure authentication
 	authCfg := &auth.Config{
-		UserpassEnabled:   cfg.EST.Authenticators.Userpass.Enabled,
-		UserpassMountPath: cfg.EST.Authenticators.Userpass.MountPath,
-		LDAPEnabled:       cfg.EST.Authenticators.LDAP.Enabled,
-		LDAPMountPath:     cfg.EST.Authenticators.LDAP.MountPath,
-		AppRoleEnabled:    cfg.EST.Authenticators.AppRole.Enabled,
-		AppRoleMountPath:  cfg.EST.Authenticators.AppRole.MountPath,
-		CertEnabled:       cfg.EST.Authenticators.Cert.Enabled,
-		CertMountPath:     cfg.EST.Authenticators.Cert.MountPath,
-		CertRole:          cfg.EST.Authenticators.Cert.CertRole,
-		TokenEnabled:      cfg.EST.Authenticators.Token.Enabled,
+		UserpassEnabled:       cfg.EST.Authenticators.Userpass.Enabled,
+		UserpassMountPath:     cfg.EST.Authenticators.Userpass.MountPath,
+		LDAPEnabled:           cfg.EST.Authenticators.LDAP.Enabled,
+		LDAPMountPath:         cfg.EST.Authenticators.LDAP.MountPath,
+		AppRoleEnabled:        cfg.EST.Authenticators.AppRole.Enabled,
+		AppRoleMountPath:      cfg.EST.Authenticators.AppRole.MountPath,
+		CertEnabled:           cfg.EST.Authenticators.Cert.Enabled,
+		CertMountPath:         cfg.EST.Authenticators.Cert.MountPath,
+		CertRole:              cfg.EST.Authenticators.Cert.CertRole,
+		CertEntityAliasPrefix: cfg.EST.Authenticators.Cert.EntityAliasPrefix,
+		CertTokenTTL:          cfg.EST.Authenticators.Cert.TokenTTL,
+		TokenEnabled:          cfg.EST.Authenticators.Token.Enabled,
 	}
 
 	// Configure enrollment

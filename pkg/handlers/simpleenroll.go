@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -31,7 +32,7 @@ func NewSimpleEnrollHandler(backend backend.Backend, authMgr *auth.Manager, conf
 	}
 
 	if config.MaxCSRSize == 0 {
-		config.MaxCSRSize = 10 * 1024 * 1024
+		config.MaxCSRSize = 64 * 1024
 	}
 
 	return &SimpleEnrollHandler{
@@ -108,6 +109,11 @@ func (h *SimpleEnrollHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 	csr, err := est.ReadCSRPayloadWithLimit(r, h.config.MaxCSRSize)
 	if err != nil {
+		if errors.Is(err, est.ErrRequestTooLarge) {
+			h.logger.Error("CSR request too large", "error", err)
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		h.logger.Error("Failed to parse CSR", "error", err)
 		http.Error(w, "Invalid CSR", http.StatusBadRequest)
 		return

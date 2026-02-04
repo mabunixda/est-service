@@ -22,7 +22,7 @@ func TestSimpleEnrollHandler_Configuration(t *testing.T) {
 			config: &EnrollmentConfig{
 				DefaultMount: "pki",
 			},
-			expectedMaxCSR: 10 * 1024 * 1024,
+			expectedMaxCSR: 64 * 1024,
 		},
 		{
 			name: "custom max CSR size",

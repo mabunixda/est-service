@@ -6,6 +6,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -20,6 +21,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mabunixda/est-service/pkg/auth"
 	"github.com/mabunixda/est-service/pkg/backend"
@@ -101,7 +103,7 @@ func (m *mockServerKeyGenBackend) AuthenticateAppRole(ctx context.Context, mount
 	return "", nil
 }
 
-func (m *mockServerKeyGenBackend) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+func (m *mockServerKeyGenBackend) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 	if m.authenticateCertFunc != nil {
 		return m.authenticateCertFunc(ctx, mount, connState, role)
 	}
@@ -139,6 +141,18 @@ func (m *mockServerKeyGenBackend) Type() backend.BackendType {
 
 func (m *mockServerKeyGenBackend) Health(ctx context.Context) (*api.HealthResponse, error) {
 	return &api.HealthResponse{}, nil
+}
+
+func (m *mockServerKeyGenBackend) CreateOrUpdateEntity(ctx context.Context, name string, metadata map[string]string, policies []string) (string, error) {
+	return "entity-id", nil
+}
+
+func (m *mockServerKeyGenBackend) CreateOrUpdateEntityAlias(ctx context.Context, entityID, aliasName, mountAccessor string) (string, error) {
+	return "alias-id", nil
+}
+
+func (m *mockServerKeyGenBackend) CreateTokenForEntity(ctx context.Context, entityID string, policies []string, ttl string) (string, error) {
+	return "entity-token", nil
 }
 
 func TestServerKeyGenHandler_RSAKeyGeneration(t *testing.T) {
@@ -708,4 +722,282 @@ func createMockAuthManager() *auth.Manager {
 	}
 
 	return auth.NewManager(mockBackend, config, slog.Default())
+}
+
+// Tests for encrypted private key generation (Issue 1.3 - Security)
+
+func TestServerKeyGenHandler_EncryptedPrivateKey(t *testing.T) {
+	logger := slog.Default()
+	mockBackend := &mockServerKeyGenBackend{}
+	mockAuth := createMockAuthManager()
+
+	// Generate a test client certificate for password encryption
+	clientCert, clientKey := createTestClientCertificate(t)
+
+	config := &ServerKeyGenConfig{
+		Enabled:           true,
+		EncryptPrivateKey: true, // Enable encryption
+		DefaultKeyType:    "rsa",
+		DefaultKeySize:    2048,
+		DefaultMount:      "pki",
+		MaxCSRSize:        4096,
+		DefaultPolicy: LabelPolicy{
+			Type:  "role",
+			Value: "test-role",
+		},
+	}
+
+	handler := NewServerKeyGenHandler(mockBackend, mockAuth, config, logger, nil)
+
+	csrPEM := createTestCSRPEM(t, "test.example.com")
+	req := httptest.NewRequest(http.MethodPost, "/.well-known/est/serverkeygen", bytes.NewReader(csrPEM))
+	req.Header.Set("Authorization", "Bearer test-token")
+
+	// Add client certificate to TLS state
+	req.TLS = &tls.ConnectionState{
+		PeerCertificates: []*x509.Certificate{clientCert},
+	}
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse multipart response
+	_, params, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil {
+		t.Fatalf("Failed to parse Content-Type: %v", err)
+	}
+
+	mr := multipart.NewReader(resp.Body, params["boundary"])
+
+	// Part 1: Certificate (skip for this test)
+	_, err = mr.NextPart()
+	if err != nil {
+		t.Fatalf("Failed to read certificate part: %v", err)
+	}
+
+	// Part 2: Encrypted private key
+	part2, err := mr.NextPart()
+	if err != nil {
+		t.Fatalf("Failed to read private key part: %v", err)
+	}
+
+	keyContentType := part2.Header.Get("Content-Type")
+	if !strings.Contains(keyContentType, "pkcs8-encrypted") {
+		t.Errorf("Expected application/pkcs8-encrypted content type, got %s", keyContentType)
+	}
+
+	encryptedKeyData, err := io.ReadAll(part2)
+	if err != nil {
+		t.Fatalf("Failed to read encrypted key data: %v", err)
+	}
+
+	if len(encryptedKeyData) == 0 {
+		t.Fatal("Encrypted key data is empty")
+	}
+
+	// Part 3: Encrypted password
+	part3, err := mr.NextPart()
+	if err != nil {
+		t.Fatalf("Failed to read encrypted password part: %v", err)
+	}
+
+	passwordContentType := part3.Header.Get("Content-Type")
+	if !strings.Contains(passwordContentType, "application/octet-stream") {
+		t.Errorf("Expected application/octet-stream content type for password, got %s", passwordContentType)
+	}
+
+	encryptedPasswordData, err := io.ReadAll(part3)
+	if err != nil {
+		t.Fatalf("Failed to read encrypted password data: %v", err)
+	}
+
+	if len(encryptedPasswordData) == 0 {
+		t.Fatal("Encrypted password data is empty")
+	}
+
+	// Decode base64 data
+	encryptedKeyDER, err := base64.StdEncoding.DecodeString(string(encryptedKeyData))
+	if err != nil {
+		t.Fatalf("Failed to decode encrypted key: %v", err)
+	}
+
+	encryptedPassword, err := base64.StdEncoding.DecodeString(string(encryptedPasswordData))
+	if err != nil {
+		t.Fatalf("Failed to decode encrypted password: %v", err)
+	}
+
+	// Decrypt password using client's private key
+	password, err := rsa.DecryptOAEP(sha256.New(), rand.Reader, clientKey, encryptedPassword, nil)
+	if err != nil {
+		t.Fatalf("Failed to decrypt password: %v", err)
+	}
+
+	if len(password) != 32 {
+		t.Errorf("Expected 32-byte password, got %d bytes", len(password))
+	}
+
+	// Decrypt the private key using the password
+	pemBlock, _ := pem.Decode(encryptedKeyDER)
+	if pemBlock == nil {
+		t.Fatal("Failed to decode PEM block")
+	}
+
+	if pemBlock.Type != "ENCRYPTED PRIVATE KEY" {
+		t.Errorf("Expected ENCRYPTED PRIVATE KEY type, got %s", pemBlock.Type)
+	}
+
+	// Decrypt PEM block
+	decryptedDER, err := x509.DecryptPEMBlock(pemBlock, password)
+	if err != nil {
+		t.Fatalf("Failed to decrypt PEM block: %v", err)
+	}
+
+	// Parse decrypted private key
+	privateKey, err := x509.ParsePKCS8PrivateKey(decryptedDER)
+	if err != nil {
+		t.Fatalf("Failed to parse decrypted private key: %v", err)
+	}
+
+	// Verify it's an RSA key
+	rsaKey, ok := privateKey.(*rsa.PrivateKey)
+	if !ok {
+		t.Errorf("Expected RSA private key, got %T", privateKey)
+	}
+
+	if rsaKey.N.BitLen() != 2048 {
+		t.Errorf("Expected 2048-bit RSA key, got %d bits", rsaKey.N.BitLen())
+	}
+
+	t.Log("Successfully decrypted and verified encrypted private key")
+}
+
+func TestServerKeyGenHandler_UnencryptedFallback(t *testing.T) {
+	logger := slog.Default()
+	mockBackend := &mockServerKeyGenBackend{}
+	mockAuth := createMockAuthManager()
+
+	config := &ServerKeyGenConfig{
+		Enabled:           true,
+		EncryptPrivateKey: false, // Encryption disabled
+		DefaultKeyType:    "rsa",
+		DefaultKeySize:    2048,
+		DefaultMount:      "pki",
+		MaxCSRSize:        4096,
+		DefaultPolicy: LabelPolicy{
+			Type:  "role",
+			Value: "test-role",
+		},
+	}
+
+	handler := NewServerKeyGenHandler(mockBackend, mockAuth, config, logger, nil)
+
+	csrPEM := createTestCSRPEM(t, "test.example.com")
+	req := httptest.NewRequest(http.MethodPost, "/.well-known/est/serverkeygen", bytes.NewReader(csrPEM))
+	req.Header.Set("Authorization", "Bearer test-token")
+
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("Expected status 200, got %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse multipart response
+	_, params, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil {
+		t.Fatalf("Failed to parse Content-Type: %v", err)
+	}
+
+	mr := multipart.NewReader(resp.Body, params["boundary"])
+
+	// Part 1: Certificate (skip)
+	_, err = mr.NextPart()
+	if err != nil {
+		t.Fatalf("Failed to read certificate part: %v", err)
+	}
+
+	// Part 2: Private key (should be unencrypted PKCS#8)
+	part2, err := mr.NextPart()
+	if err != nil {
+		t.Fatalf("Failed to read private key part: %v", err)
+	}
+
+	keyContentType := part2.Header.Get("Content-Type")
+	// Should be application/pkcs8, NOT pkcs8-encrypted
+	if strings.Contains(keyContentType, "pkcs8-encrypted") {
+		t.Errorf("Expected unencrypted application/pkcs8 content type, got %s", keyContentType)
+	}
+
+	keyData, err := io.ReadAll(part2)
+	if err != nil {
+		t.Fatalf("Failed to read key data: %v", err)
+	}
+
+	// Decode and verify it's an unencrypted PKCS#8 key
+	keyDER, err := base64.StdEncoding.DecodeString(string(keyData))
+	if err != nil {
+		t.Fatalf("Failed to decode private key: %v", err)
+	}
+
+	privateKey, err := x509.ParsePKCS8PrivateKey(keyDER)
+	if err != nil {
+		t.Fatalf("Failed to parse unencrypted PKCS8 private key: %v", err)
+	}
+
+	_, ok := privateKey.(*rsa.PrivateKey)
+	if !ok {
+		t.Errorf("Expected RSA private key, got %T", privateKey)
+	}
+
+	// Part 3: Should not exist (no encrypted password)
+	_, err = mr.NextPart()
+	if err != io.EOF {
+		t.Error("Expected only 2 parts for unencrypted mode, found 3rd part")
+	}
+}
+
+// createTestClientCertificate creates a self-signed RSA certificate for testing
+func createTestClientCertificate(t *testing.T) (*x509.Certificate, *rsa.PrivateKey) {
+	t.Helper()
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("Failed to generate client key: %v", err)
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: "test-client",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
+		BasicConstraintsValid: true,
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &privateKey.PublicKey, privateKey)
+	if err != nil {
+		t.Fatalf("Failed to create client certificate: %v", err)
+	}
+
+	cert, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		t.Fatalf("Failed to parse client certificate: %v", err)
+	}
+
+	return cert, privateKey
 }

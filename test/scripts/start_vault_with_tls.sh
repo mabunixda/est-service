@@ -137,7 +137,6 @@ audit "file" "file_audit" {
 
 api_addr = "https://$VAULT_LISTEN_ADDR"
 ui = true
-disable_mlock = true
 EOF
 
 log_success "Vault configuration created: $VAULT_CONFIG_FILE"

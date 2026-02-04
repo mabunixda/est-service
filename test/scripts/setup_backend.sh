@@ -116,6 +116,26 @@ path "$PKI_PATH/ca_chain" {
 path "$PKI_PATH/cert/ca_chain" {
     capabilities = ["read"]
 }
+
+# Identity management for per-client entities (Issue 1.1 - Certificate Auth Identity)
+# Required when using TLS client certificate authentication
+# The EST service creates unique Vault/OpenBao entities for each client certificate
+# to ensure proper audit trails and per-client authorization
+path "identity/entity/name/*" {
+    capabilities = ["create", "update", "read"]
+}
+
+path "identity/entity-alias" {
+    capabilities = ["create", "update"]
+}
+
+path "auth/token/create" {
+    capabilities = ["create", "update"]
+}
+
+path "sys/auth" {
+    capabilities = ["read"]
+}
 EOF
 
 $BAO_CMD policy write est-policy est-policy.hcl

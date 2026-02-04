@@ -9,6 +9,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"math/big"
 	"net"
 	"net/http/httptest"
@@ -104,8 +105,8 @@ func TestReadCSRPayload(t *testing.T) {
 }
 
 func TestReadCSRPayloadSizeLimit(t *testing.T) {
-	// Create a request with body larger than 10MB
-	largeBody := strings.Repeat("A", 11*1024*1024)
+	// Create a request with body larger than default 64KB
+	largeBody := strings.Repeat("A", 65*1024)
 	req := httptest.NewRequest("POST", "/test", strings.NewReader(largeBody))
 
 	_, err := ReadCSRPayload(req)
@@ -113,8 +114,23 @@ func TestReadCSRPayloadSizeLimit(t *testing.T) {
 		t.Error("ReadCSRPayload() should fail with oversized body")
 		return
 	}
-	if !strings.Contains(err.Error(), "too large") {
-		t.Errorf("Expected oversized body error, got: %v", err)
+	if !errors.Is(err, ErrRequestTooLarge) {
+		t.Errorf("Expected ErrRequestTooLarge, got: %v", err)
+	}
+}
+
+func TestReadCSRPayloadWithLimit_ContentLengthTooLarge(t *testing.T) {
+	maxSize := int64(1024)
+	largeBody := strings.Repeat("A", 2048)
+	req := httptest.NewRequest("POST", "/test", strings.NewReader(largeBody))
+
+	_, err := ReadCSRPayloadWithLimit(req, maxSize)
+	if err == nil {
+		t.Error("ReadCSRPayloadWithLimit() should fail with oversized Content-Length")
+		return
+	}
+	if !errors.Is(err, ErrRequestTooLarge) {
+		t.Errorf("Expected ErrRequestTooLarge, got: %v", err)
 	}
 }
 
@@ -714,6 +730,15 @@ func TestValidateCSRSignatureAlgorithm_EmptyWhitelist(t *testing.T) {
 	}
 }
 
+func TestValidateCSRSignatureAlgorithm_WeakAlgorithmRejected(t *testing.T) {
+	csr := &x509.CertificateRequest{SignatureAlgorithm: x509.SHA1WithRSA}
+
+	err := ValidateCSRSignatureAlgorithm(csr, nil)
+	if err == nil {
+		t.Error("Weak signature algorithm should be rejected")
+	}
+}
+
 func TestValidateCSRSignatureAlgorithm_AllowedRSA(t *testing.T) {
 	// Generate RSA CSR with SHA256
 	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -940,17 +965,19 @@ func TestParseSignatureAlgorithm(t *testing.T) {
 		wantOk   bool
 	}{
 		// RSA algorithms
-		{"MD5WithRSA", "MD5WithRSA", x509.MD5WithRSA, true},
-		{"SHA1WithRSA", "SHA1WithRSA", x509.SHA1WithRSA, true},
 		{"SHA256WithRSA", "SHA256WithRSA", x509.SHA256WithRSA, true},
 		{"SHA384WithRSA", "SHA384WithRSA", x509.SHA384WithRSA, true},
 		{"SHA512WithRSA", "SHA512WithRSA", x509.SHA512WithRSA, true},
 
 		// ECDSA algorithms
-		{"ECDSAWithSHA1", "ECDSAWithSHA1", x509.ECDSAWithSHA1, true},
 		{"ECDSAWithSHA256", "ECDSAWithSHA256", x509.ECDSAWithSHA256, true},
 		{"ECDSAWithSHA384", "ECDSAWithSHA384", x509.ECDSAWithSHA384, true},
 		{"ECDSAWithSHA512", "ECDSAWithSHA512", x509.ECDSAWithSHA512, true},
+
+		// Deprecated algorithms should be rejected
+		{"MD5WithRSA", "MD5WithRSA", x509.UnknownSignatureAlgorithm, false},
+		{"SHA1WithRSA", "SHA1WithRSA", x509.UnknownSignatureAlgorithm, false},
+		{"ECDSAWithSHA1", "ECDSAWithSHA1", x509.UnknownSignatureAlgorithm, false},
 
 		// Case variations
 		{"lowercase", "sha256withrsa", x509.SHA256WithRSA, true},

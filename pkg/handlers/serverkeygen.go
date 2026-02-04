@@ -6,8 +6,11 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -53,6 +56,13 @@ type ServerKeyGenRequest struct {
 	Policy       LabelPolicy
 }
 
+// EncryptedPrivateKey contains an encrypted private key and the encrypted password
+type EncryptedPrivateKey struct {
+	EncryptedKeyDER   []byte // PEM-encrypted PKCS#8 private key
+	EncryptedPassword []byte // Password encrypted with client's public key
+	PasswordEncrypted bool   // True if password encryption was successful
+}
+
 // NewServerKeyGenHandler creates a new server-side key generation handler
 func NewServerKeyGenHandler(backend backend.Backend, authMgr *auth.Manager, config *ServerKeyGenConfig, logger *slog.Logger, telemetry Telemetry) *ServerKeyGenHandler {
 	if logger == nil {
@@ -62,16 +72,16 @@ func NewServerKeyGenHandler(backend backend.Backend, authMgr *auth.Manager, conf
 		telemetry = &NoOpTelemetry{}
 	}
 	if config.MaxCSRSize == 0 {
-		config.MaxCSRSize = 4096 // Default 4KB
+		config.MaxCSRSize = DefaultServerKeyGenCSRMaxSize
 	}
 	if config.DefaultKeyType == "" {
 		config.DefaultKeyType = "rsa"
 	}
 	if config.DefaultKeySize == 0 {
 		if config.DefaultKeyType == "rsa" {
-			config.DefaultKeySize = 2048
+			config.DefaultKeySize = DefaultRSAKeySize
 		} else {
-			config.DefaultKeySize = 256 // P-256
+			config.DefaultKeySize = DefaultECDSAKeySize
 		}
 	}
 
@@ -126,6 +136,11 @@ func (h *ServerKeyGenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	// Parse request
 	req, err := h.parseServerKeyGenRequest(r, authResult)
 	if err != nil {
+		if errors.Is(err, est.ErrRequestTooLarge) {
+			h.logger.Error("CSR request too large", "error", err)
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		h.logger.Error("Failed to parse serverkeygen request", "error", err)
 		h.telemetry.RecordCertificateRejected(ctx, "serverkeygen", err.Error())
 		http.Error(w, fmt.Sprintf("Invalid request: %v", err), http.StatusBadRequest)
@@ -199,8 +214,13 @@ func (h *ServerKeyGenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Encode private key (PKCS#8 format)
-	privateKeyDER, err := h.encodePrivateKey(privateKey)
+	// Encode private key (PKCS#8 format, encrypted if configured)
+	var clientCert *x509.Certificate
+	if r.TLS != nil && len(r.TLS.PeerCertificates) > 0 {
+		clientCert = r.TLS.PeerCertificates[0]
+	}
+
+	encryptedKey, err := h.encodePrivateKey(privateKey, clientCert)
 	if err != nil {
 		h.logger.Error("Failed to encode private key", "error", err)
 		h.telemetry.RecordCertificateRejected(ctx, "serverkeygen", err.Error())
@@ -209,7 +229,7 @@ func (h *ServerKeyGenHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// Create multipart response per RFC 7030 Section 4.4.2
-	err = h.sendServerKeyGenResponse(w, cert, privateKeyDER)
+	err = h.sendServerKeyGenResponse(w, cert, encryptedKey)
 	if err != nil {
 		h.logger.Error("Failed to send response", "error", err)
 		return
@@ -302,9 +322,9 @@ func (h *ServerKeyGenHandler) generateRSAKeyPair() (*rsa.PrivateKey, *rsa.Public
 		}
 	}
 
-	// Security check: minimum 2048 bits for RSA
-	if keySize < 2048 {
-		return nil, nil, fmt.Errorf("RSA key size must be at least 2048 bits")
+	// Security check: enforce minimum RSA key size
+	if keySize < MinRSAKeySize {
+		return nil, nil, fmt.Errorf("RSA key size must be at least %d bits", MinRSAKeySize)
 	}
 
 	privateKey, err := rsa.GenerateKey(rand.Reader, keySize)
@@ -335,14 +355,14 @@ func (h *ServerKeyGenHandler) generateECDSAKeyPair() (*ecdsa.PrivateKey, *ecdsa.
 
 	var curve elliptic.Curve
 	switch keySize {
-	case 256:
+	case ECDSACurveP256:
 		curve = elliptic.P256()
-	case 384:
+	case ECDSACurveP384:
 		curve = elliptic.P384()
-	case 521:
+	case ECDSACurveP521:
 		curve = elliptic.P521()
 	default:
-		return nil, nil, fmt.Errorf("unsupported ECDSA key size: %d (must be 256, 384, or 521)", keySize)
+		return nil, nil, fmt.Errorf("unsupported ECDSA key size: %d (must be %s)", keySize, ValidECDSACurveSizesString())
 	}
 
 	privateKey, err := ecdsa.GenerateKey(curve, rand.Reader)
@@ -353,55 +373,150 @@ func (h *ServerKeyGenHandler) generateECDSAKeyPair() (*ecdsa.PrivateKey, *ecdsa.
 	return privateKey, &privateKey.PublicKey, nil
 }
 
-// encodePrivateKey encodes the private key in PKCS#8 format
-func (h *ServerKeyGenHandler) encodePrivateKey(privateKey crypto.PrivateKey) ([]byte, error) {
-	// Marshal to PKCS#8 format (unencrypted)
-	// RFC 7030 Section 4.4.2 allows encryption but most implementations use unencrypted
+// encodePrivateKey encodes the private key in PKCS#8 format with optional encryption
+func (h *ServerKeyGenHandler) encodePrivateKey(privateKey crypto.PrivateKey, clientCert *x509.Certificate) (*EncryptedPrivateKey, error) {
+	// Marshal to PKCS#8 format first
 	pkcs8DER, err := x509.MarshalPKCS8PrivateKey(privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal private key: %w", err)
 	}
 
-	return pkcs8DER, nil
+	result := &EncryptedPrivateKey{
+		PasswordEncrypted: false,
+	}
+
+	// If encryption is not enabled, return unencrypted key
+	// SECURITY WARNING: This transmits private keys in plaintext!
+	if !h.config.EncryptPrivateKey {
+		h.logger.Warn("Returning UNENCRYPTED private key - encrypt_private_key is disabled")
+		result.EncryptedKeyDER = pkcs8DER
+		return result, nil
+	}
+
+	// Generate a random password for AES-256 encryption
+	password := make([]byte, AES256KeySizeBytes)
+	if _, err := rand.Read(password); err != nil {
+		return nil, fmt.Errorf("failed to generate encryption password: %w", err)
+	}
+
+	// Create PEM block with PKCS#8 data
+	pemBlock := &pem.Block{
+		Type:  "ENCRYPTED PRIVATE KEY",
+		Bytes: pkcs8DER,
+	}
+
+	// Encrypt the PEM block using AES-256-CBC
+	encryptedPEM, err := x509.EncryptPEMBlock(rand.Reader, pemBlock.Type, pemBlock.Bytes, password, x509.PEMCipherAES256)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encrypt private key: %w", err)
+	}
+
+	// Encode the encrypted PEM block to DER format for transmission
+	result.EncryptedKeyDER = pem.EncodeToMemory(encryptedPEM)
+
+	// Encrypt the password using the client's certificate public key (hybrid encryption)
+	if clientCert != nil {
+		encryptedPassword, err := h.encryptPasswordForClient(password, clientCert)
+		if err != nil {
+			h.logger.Warn("Failed to encrypt password with client certificate", "error", err)
+			// Continue without password encryption - client won't be able to decrypt the key
+		} else {
+			result.EncryptedPassword = encryptedPassword
+			result.PasswordEncrypted = true
+		}
+	} else {
+		h.logger.Warn("No client certificate available for password encryption")
+	}
+
+	return result, nil
+}
+
+// encryptPasswordForClient encrypts the password using the client's certificate public key
+func (h *ServerKeyGenHandler) encryptPasswordForClient(password []byte, clientCert *x509.Certificate) ([]byte, error) {
+	publicKey := clientCert.PublicKey
+
+	switch pub := publicKey.(type) {
+	case *rsa.PublicKey:
+		// Use RSA-OAEP with SHA-256 for encryption
+		encryptedPassword, err := rsa.EncryptOAEP(sha256.New(), rand.Reader, pub, password, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encrypt password with RSA: %w", err)
+		}
+		return encryptedPassword, nil
+
+	case *ecdsa.PublicKey:
+		// ECDSA keys don't support direct encryption
+		// We would need to use ECIES (Elliptic Curve Integrated Encryption Scheme)
+		// For now, return error and fall back to unencrypted password delivery
+		return nil, fmt.Errorf("ECDSA client certificates not supported for password encryption (ECIES not implemented)")
+
+	default:
+		return nil, fmt.Errorf("unsupported client certificate public key type: %T", pub)
+	}
 }
 
 // sendServerKeyGenResponse sends the multipart response with certificate and private key
 // RFC 7030 Section 4.4.2 specifies a multipart/mixed response with:
 // 1. application/pkcs7-mime (certificate)
-// 2. application/pkcs8 (private key)
-func (h *ServerKeyGenHandler) sendServerKeyGenResponse(w http.ResponseWriter, cert *x509.Certificate, privateKeyDER []byte) error {
+// 2. application/pkcs8 (private key - encrypted if configured)
+// 3. application/octet-stream (encrypted password - only if password encryption succeeded)
+func (h *ServerKeyGenHandler) sendServerKeyGenResponse(w http.ResponseWriter, cert *x509.Certificate, encryptedKey *EncryptedPrivateKey) error {
 	// Create PKCS#7 certs-only structure for the certificate
 	pkcs7Cert, err := est.CreatePKCS7CertsOnly([]*x509.Certificate{cert})
 	if err != nil {
 		return fmt.Errorf("failed to create PKCS#7: %w", err)
 	}
 
-	// Base64 encode both parts
+	// Base64 encode certificate and key
 	certB64 := base64.StdEncoding.EncodeToString(pkcs7Cert)
-	keyB64 := base64.StdEncoding.EncodeToString(privateKeyDER)
+	keyB64 := base64.StdEncoding.EncodeToString(encryptedKey.EncryptedKeyDER)
 
 	// RFC 7030 Section 4.4.2: Use multipart/mixed with base64 encoding
-	// Simplified implementation: concatenate with clear boundary
-	boundary := "EstServerKeyGenBoundary"
+	boundary := MultipartBoundaryServerKeyGen
 
 	w.Header().Set("Content-Type", fmt.Sprintf("multipart/mixed; boundary=%s", boundary))
 	w.WriteHeader(http.StatusOK)
 
-	// Write multipart response
-	response := fmt.Sprintf(`--%s
+	// Build multipart response
+	var response strings.Builder
+
+	// Part 1: Certificate
+	response.WriteString(fmt.Sprintf(`--%s
 Content-Type: application/pkcs7-mime; smime-type=certs-only
 Content-Transfer-Encoding: base64
 
 %s
---%s
-Content-Type: application/pkcs8
+`, boundary, certB64))
+
+	// Part 2: Private key (encrypted or unencrypted)
+	keyContentType := "application/pkcs8"
+	if h.config.EncryptPrivateKey {
+		keyContentType = "application/pkcs8-encrypted"
+	}
+	response.WriteString(fmt.Sprintf(`--%s
+Content-Type: %s
 Content-Transfer-Encoding: base64
 
 %s
---%s--
-`, boundary, certB64, boundary, keyB64, boundary)
+`, boundary, keyContentType, keyB64))
 
-	if _, err := w.Write([]byte(response)); err != nil {
+	// Part 3: Encrypted password (only if encryption succeeded)
+	if encryptedKey.PasswordEncrypted && len(encryptedKey.EncryptedPassword) > 0 {
+		passwordB64 := base64.StdEncoding.EncodeToString(encryptedKey.EncryptedPassword)
+		response.WriteString(fmt.Sprintf(`--%s
+Content-Type: application/octet-stream
+Content-Description: encrypted-key-password
+Content-Transfer-Encoding: base64
+
+%s
+`, boundary, passwordB64))
+	}
+
+	// Final boundary
+	response.WriteString(fmt.Sprintf(`--%s--
+`, boundary))
+
+	if _, err := w.Write([]byte(response.String())); err != nil {
 		return fmt.Errorf("failed to write response: %w", err)
 	}
 

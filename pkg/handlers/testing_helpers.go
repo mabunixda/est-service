@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -62,14 +63,23 @@ func (m *mockBackendHandlers) GetIssuerPEM(ctx context.Context, mount, issuer st
 }
 
 func (m *mockBackendHandlers) AuthenticateUserpass(ctx context.Context, mount, username, password string) (string, error) {
-	if username == "testuser" && password == "testpass" {
+	// Use constant-time comparison to prevent timing attacks even in tests
+	// This serves as a good example for production code patterns
+	usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte("testuser")) == 1
+	passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte("testpass")) == 1
+
+	if usernameMatch && passwordMatch {
 		return "test-token", nil
 	}
 	return "", fmt.Errorf("invalid credentials")
 }
 
 func (m *mockBackendHandlers) AuthenticateLDAP(ctx context.Context, mount, username, password string) (string, error) {
-	if username == "ldapuser" && password == "ldappass" {
+	// Use constant-time comparison to prevent timing attacks even in tests
+	usernameMatch := subtle.ConstantTimeCompare([]byte(username), []byte("ldapuser")) == 1
+	passwordMatch := subtle.ConstantTimeCompare([]byte(password), []byte("ldappass")) == 1
+
+	if usernameMatch && passwordMatch {
 		return "ldap-token", nil
 	}
 	return "", fmt.Errorf("invalid LDAP credentials")
@@ -82,7 +92,7 @@ func (m *mockBackendHandlers) AuthenticateAppRole(ctx context.Context, mount, ro
 	return "", fmt.Errorf("invalid approle credentials")
 }
 
-func (m *mockBackendHandlers) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+func (m *mockBackendHandlers) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 	if connState != nil && len(connState.PeerCertificates) > 0 {
 		return "cert-token", nil
 	}
@@ -93,7 +103,8 @@ func (m *mockBackendHandlers) ValidateToken(ctx context.Context, token string) (
 	if m.validateTokenFunc != nil {
 		return m.validateTokenFunc(ctx, token)
 	}
-	return token == "valid-token", nil
+	// Use constant-time comparison to prevent timing attacks even in tests
+	return subtle.ConstantTimeCompare([]byte(token), []byte("valid-token")) == 1, nil
 }
 
 func (m *mockBackendHandlers) LookupToken(ctx context.Context, token string) (map[string]interface{}, error) {
@@ -105,6 +116,18 @@ func (m *mockBackendHandlers) RenewToken(ctx context.Context) error {
 }
 
 func (m *mockBackendHandlers) StartTokenRenewal(ctx context.Context) {}
+
+func (m *mockBackendHandlers) CreateOrUpdateEntity(ctx context.Context, name string, metadata map[string]string, policies []string) (string, error) {
+	return "test-entity-id", nil
+}
+
+func (m *mockBackendHandlers) CreateOrUpdateEntityAlias(ctx context.Context, entityID, aliasName, mountAccessor string) (string, error) {
+	return "test-alias-id", nil
+}
+
+func (m *mockBackendHandlers) CreateTokenForEntity(ctx context.Context, entityID string, policies []string, ttl string) (string, error) {
+	return "test-entity-token", nil
+}
 
 func (m *mockBackendHandlers) GetAPIClient() *api.Client {
 	return nil

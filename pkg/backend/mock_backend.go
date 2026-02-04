@@ -24,13 +24,18 @@ type MockBackend struct {
 	AuthenticateUserpassFunc func(ctx context.Context, mount, username, password string) (string, error)
 	AuthenticateLDAPFunc     func(ctx context.Context, mount, username, password string) (string, error)
 	AuthenticateAppRoleFunc  func(ctx context.Context, mount, roleID, secretID string) (string, error)
-	AuthenticateCertFunc     func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error)
+	AuthenticateCertFunc     func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error)
 	ValidateTokenFunc        func(ctx context.Context, token string) (bool, error)
 	LookupTokenFunc          func(ctx context.Context, token string) (map[string]interface{}, error)
 
 	// Token Management
 	RenewTokenFunc        func(ctx context.Context) error
 	StartTokenRenewalFunc func(ctx context.Context)
+
+	// Identity Management
+	CreateOrUpdateEntityFunc      func(ctx context.Context, name string, metadata map[string]string, policies []string) (string, error)
+	CreateOrUpdateEntityAliasFunc func(ctx context.Context, entityID, aliasName, mountAccessor string) (string, error)
+	CreateTokenForEntityFunc      func(ctx context.Context, entityID string, policies []string, ttl string) (string, error)
 
 	// Client Access
 	GetAPIClientFunc func() *api.Client
@@ -118,9 +123,9 @@ func (m *MockBackend) AuthenticateAppRole(ctx context.Context, mount, roleID, se
 }
 
 // AuthenticateCert implements Backend.AuthenticateCert
-func (m *MockBackend) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+func (m *MockBackend) AuthenticateCert(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 	if m.AuthenticateCertFunc != nil {
-		return m.AuthenticateCertFunc(ctx, mount, connState, role)
+		return m.AuthenticateCertFunc(ctx, mount, connState, role, entityAliasPrefix, tokenTTL)
 	}
 	return "", nil
 }
@@ -156,6 +161,30 @@ func (m *MockBackend) StartTokenRenewal(ctx context.Context) {
 	}
 }
 
+// CreateOrUpdateEntity implements Backend.CreateOrUpdateEntity
+func (m *MockBackend) CreateOrUpdateEntity(ctx context.Context, name string, metadata map[string]string, policies []string) (string, error) {
+	if m.CreateOrUpdateEntityFunc != nil {
+		return m.CreateOrUpdateEntityFunc(ctx, name, metadata, policies)
+	}
+	return "mock-entity-id", nil
+}
+
+// CreateOrUpdateEntityAlias implements Backend.CreateOrUpdateEntityAlias
+func (m *MockBackend) CreateOrUpdateEntityAlias(ctx context.Context, entityID, aliasName, mountAccessor string) (string, error) {
+	if m.CreateOrUpdateEntityAliasFunc != nil {
+		return m.CreateOrUpdateEntityAliasFunc(ctx, entityID, aliasName, mountAccessor)
+	}
+	return "mock-alias-id", nil
+}
+
+// CreateTokenForEntity implements Backend.CreateTokenForEntity
+func (m *MockBackend) CreateTokenForEntity(ctx context.Context, entityID string, policies []string, ttl string) (string, error) {
+	if m.CreateTokenForEntityFunc != nil {
+		return m.CreateTokenForEntityFunc(ctx, entityID, policies, ttl)
+	}
+	return "mock-token", nil
+}
+
 // GetAPIClient implements Backend.GetAPIClient
 func (m *MockBackend) GetAPIClient() *api.Client {
 	if m.GetAPIClientFunc != nil {
@@ -171,24 +200,27 @@ func (m *MockBackend) CloneWithToken(ctx context.Context, token string) (Backend
 	}
 	// Return a new mock with the same functions
 	return &MockBackend{
-		HealthFunc:               m.HealthFunc,
-		GetCACertificateFunc:     m.GetCACertificateFunc,
-		GetCAChainFunc:           m.GetCAChainFunc,
-		SignCSRFunc:              m.SignCSRFunc,
-		SignCSRVerbatimFunc:      m.SignCSRVerbatimFunc,
-		GetIssuerPEMFunc:         m.GetIssuerPEMFunc,
-		AuthenticateUserpassFunc: m.AuthenticateUserpassFunc,
-		AuthenticateLDAPFunc:     m.AuthenticateLDAPFunc,
-		AuthenticateAppRoleFunc:  m.AuthenticateAppRoleFunc,
-		AuthenticateCertFunc:     m.AuthenticateCertFunc,
-		ValidateTokenFunc:        m.ValidateTokenFunc,
-		LookupTokenFunc:          m.LookupTokenFunc,
-		RenewTokenFunc:           m.RenewTokenFunc,
-		StartTokenRenewalFunc:    m.StartTokenRenewalFunc,
-		GetAPIClientFunc:         m.GetAPIClientFunc,
-		CloneWithTokenFunc:       m.CloneWithTokenFunc,
-		CloseFunc:                m.CloseFunc,
-		TypeFunc:                 m.TypeFunc,
+		HealthFunc:                    m.HealthFunc,
+		GetCACertificateFunc:          m.GetCACertificateFunc,
+		GetCAChainFunc:                m.GetCAChainFunc,
+		SignCSRFunc:                   m.SignCSRFunc,
+		SignCSRVerbatimFunc:           m.SignCSRVerbatimFunc,
+		GetIssuerPEMFunc:              m.GetIssuerPEMFunc,
+		AuthenticateUserpassFunc:      m.AuthenticateUserpassFunc,
+		AuthenticateLDAPFunc:          m.AuthenticateLDAPFunc,
+		AuthenticateAppRoleFunc:       m.AuthenticateAppRoleFunc,
+		AuthenticateCertFunc:          m.AuthenticateCertFunc,
+		ValidateTokenFunc:             m.ValidateTokenFunc,
+		LookupTokenFunc:               m.LookupTokenFunc,
+		RenewTokenFunc:                m.RenewTokenFunc,
+		StartTokenRenewalFunc:         m.StartTokenRenewalFunc,
+		CreateOrUpdateEntityFunc:      m.CreateOrUpdateEntityFunc,
+		CreateOrUpdateEntityAliasFunc: m.CreateOrUpdateEntityAliasFunc,
+		CreateTokenForEntityFunc:      m.CreateTokenForEntityFunc,
+		GetAPIClientFunc:              m.GetAPIClientFunc,
+		CloneWithTokenFunc:            m.CloneWithTokenFunc,
+		CloseFunc:                     m.CloseFunc,
+		TypeFunc:                      m.TypeFunc,
 	}, nil
 }
 

@@ -352,7 +352,7 @@ func TestAuthenticateCert_ValidCertificate(t *testing.T) {
 	cert := generateTestCert(t, "client.example.com")
 
 	mock := &backend.MockBackend{
-		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 			return "cert-token", nil
 		},
 	}
@@ -388,7 +388,7 @@ func TestAuthenticateCert_BackendRejection(t *testing.T) {
 	cert := generateTestCert(t, "untrusted.example.com")
 
 	mock := &backend.MockBackend{
-		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 			return "", fmt.Errorf("certificate not trusted")
 		},
 	}
@@ -415,7 +415,7 @@ func TestAuthenticateCert_CustomRole(t *testing.T) {
 
 	roleUsed := ""
 	mock := &backend.MockBackend{
-		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 			roleUsed = role
 			return "cert-token", nil
 		},
@@ -489,7 +489,7 @@ func TestAuthenticate_CertTakesPriorityOverBasic(t *testing.T) {
 	authMethodUsed := ""
 
 	mock := &backend.MockBackend{
-		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 			authMethodUsed = "cert"
 			return "cert-token", nil
 		},

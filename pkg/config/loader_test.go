@@ -338,4 +338,89 @@ observability:
 			t.Error("Should fail with invalid log format")
 		}
 	})
+
+	t.Run("validates server_key_gen encryption requirement", func(t *testing.T) {
+		configYAML := `
+backend:
+  address: "https://localhost:8200"
+  token: "test-token"
+server:
+  tls:
+    cert_file: "/tmp/cert"
+    key_file: "/tmp/key"
+est:
+  server_key_gen:
+    enabled: true
+    encrypt_private_key: false
+`
+		tmpFile, err := os.CreateTemp("", "config-*.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		if _, err := tmpFile.WriteString(configYAML); err != nil {
+			t.Fatal(err)
+		}
+		tmpFile.Close()
+
+		_, err = Load(tmpFile.Name())
+		if err == nil {
+			t.Error("Should fail when server_key_gen is enabled without encrypt_private_key")
+		}
+		if err != nil && !contains(err.Error(), "encrypt_private_key") {
+			t.Errorf("Expected error about encrypt_private_key, got: %v", err)
+		}
+	})
+
+	t.Run("allows server_key_gen when encryption is enabled", func(t *testing.T) {
+		configYAML := `
+backend:
+  address: "https://localhost:8200"
+  token: "test-token"
+server:
+  tls:
+    cert_file: "/tmp/cert"
+    key_file: "/tmp/key"
+est:
+  server_key_gen:
+    enabled: true
+    encrypt_private_key: true
+`
+		tmpFile, err := os.CreateTemp("", "config-*.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.Remove(tmpFile.Name())
+
+		if _, err := tmpFile.WriteString(configYAML); err != nil {
+			t.Fatal(err)
+		}
+		tmpFile.Close()
+
+		cfg, err := Load(tmpFile.Name())
+		if err != nil {
+			t.Errorf("Should allow server_key_gen with encrypt_private_key enabled: %v", err)
+		}
+
+		if !cfg.EST.ServerKeyGen.Enabled {
+			t.Error("Expected server_key_gen to be enabled")
+		}
+		if !cfg.EST.ServerKeyGen.EncryptPrivateKey {
+			t.Error("Expected encrypt_private_key to be true")
+		}
+	})
+}
+
+func contains(s, substr string) bool {
+	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) >= len(substr) && findSubstring(s, substr))
+}
+
+func findSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

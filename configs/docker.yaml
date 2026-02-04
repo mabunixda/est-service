@@ -59,7 +59,25 @@ est:
       enabled: true
 
   csr_validation:
-    max_size_bytes: 32768
+    max_size_bytes: 65536
+    allowed_signature_algorithms:
+      - "SHA256WithRSA"
+      - "SHA384WithRSA"
+      - "SHA512WithRSA"
+      - "ECDSAWithSHA256"
+      - "ECDSAWithSHA384"
+      - "ECDSAWithSHA512"
+
+  # Server-side key generation (RFC 7030 Section 4.4)
+  # WARNING: Disabled by default for security - transmits private keys over network
+  # Only enable if client-side key generation is not feasible
+  server_key_gen:
+    enabled: false # MUST be false unless specifically required
+    encrypt_private_key: true # REQUIRED if enabled: encrypts private keys
+    default_key_type: "rsa" # rsa or ecdsa
+    default_key_size: 2048 # RSA: 2048, 3072, 4096; ECDSA: 256, 384, 521
+    max_csr_size: 4096 # Maximum CSR size for serverkeygen requests
+    use_auth_token: true # Use authenticated token for PKI operations
 
 observability:
   metrics:

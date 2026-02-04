@@ -31,7 +31,7 @@ func TestSimpleReenrollWorkflow_Success(t *testing.T) {
 
 	// Setup mock backend
 	mock := &backend.MockBackend{
-		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 			if connState != nil && len(connState.PeerCertificates) > 0 {
 				return "cert-token-123", nil
 			}
@@ -162,7 +162,7 @@ func TestSimpleReenrollWorkflow_InvalidCSR(t *testing.T) {
 	clientCert, _ := generateTestClientCert(t)
 
 	mock := &backend.MockBackend{
-		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 			return "cert-token", nil
 		},
 	}
@@ -196,7 +196,7 @@ func TestSimpleReenrollWorkflow_BackendError(t *testing.T) {
 	csrDER := generateTestCSRWithKey(t, clientKey)
 
 	mock := &backend.MockBackend{
-		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 			return "cert-token", nil
 		},
 		CloneWithTokenFunc: func(ctx context.Context, token string) (backend.Backend, error) {
@@ -243,7 +243,7 @@ func TestSimpleReenrollWorkflow_WithCustomTTL(t *testing.T) {
 	ttlUsed := ""
 
 	mock := &backend.MockBackend{
-		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 			return "cert-token", nil
 		},
 		CloneWithTokenFunc: func(ctx context.Context, token string) (backend.Backend, error) {
@@ -378,7 +378,7 @@ func TestSimpleReenrollWorkflow_SubjectMismatch(t *testing.T) {
 	)
 
 	mock := &backend.MockBackend{
-		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 			return "cert-token-123", nil
 		},
 	}
@@ -428,7 +428,7 @@ func TestSimpleReenrollWorkflow_SANMismatch(t *testing.T) {
 	)
 
 	mock := &backend.MockBackend{
-		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role string) (string, error) {
+		AuthenticateCertFunc: func(ctx context.Context, mount string, connState *tls.ConnectionState, role, entityAliasPrefix, tokenTTL string) (string, error) {
 			return "cert-token-123", nil
 		},
 	}
