@@ -16,22 +16,16 @@ import (
 	"time"
 
 	"github.com/openbao/openbao/api/v2"
-	"github.com/testcontainers/testcontainers-go"
-	"github.com/testcontainers/testcontainers-go/wait"
 )
 
 var (
 	// Shared test infrastructure
-	vaultContainer testcontainers.Container
-	vaultAddr      string
-	vaultToken     = "root-token"
-	testBackend    Backend
-	testLogger     *slog.Logger
+	vaultAddr   string
+	vaultToken  string
+	testBackend Backend
+	testLogger  *slog.Logger
+	pkiMount    string // Configurable PKI mount path for tests
 )
-
-// func init() {
-
-// }
 
 // TestMain sets up and tears down the test environment
 func TestMain(m *testing.M) {
@@ -42,94 +36,88 @@ func TestMain(m *testing.M) {
 		Level: slog.LevelDebug,
 	}))
 
-	// Start Vault container
-	if err := setupVaultContainer(ctx); err != nil {
-		testLogger.Error("Failed to setup Vault container", "error", err)
+	// Get Vault/OpenBao connection info from environment
+	vaultAddr = os.Getenv("VAULT_ADDR")
+	if vaultAddr == "" {
+		vaultAddr = os.Getenv("BAO_ADDR")
+	}
+	if vaultAddr == "" {
+		testLogger.Error("VAULT_ADDR or BAO_ADDR environment variable not set")
+		testLogger.Info("Integration tests require a running Vault or OpenBao instance")
+		testLogger.Info("Set VAULT_ADDR/BAO_ADDR and VAULT_TOKEN/BAO_TOKEN environment variables")
 		os.Exit(1)
 	}
 
-	// Initialize PKI and auth
+	vaultToken = os.Getenv("VAULT_TOKEN")
+	if vaultToken == "" {
+		vaultToken = os.Getenv("BAO_TOKEN")
+	}
+	if vaultToken == "" {
+		testLogger.Error("VAULT_TOKEN or BAO_TOKEN environment variable not set")
+		os.Exit(1)
+	}
+
+	testLogger.Info("Using existing Vault/OpenBao instance",
+		"addr", vaultAddr,
+		"token_prefix", vaultToken[:min(10, len(vaultToken))]+"...")
+
+	// Get PKI mount path from environment or use default
+	pkiMount = os.Getenv("PKI_MOUNT_PATH")
+	if pkiMount == "" {
+		pkiMount = "pki-backend-test" // Default separate mount for backend tests
+	}
+	testLogger.Info("Using PKI mount", "mount", pkiMount)
+
+	// Initialize PKI and auth (idempotent - safe to run multiple times)
 	if err := initializeVault(ctx); err != nil {
 		testLogger.Error("Failed to initialize Vault", "error", err)
-		vaultContainer.Terminate(ctx)
 		os.Exit(1)
+	}
+
+	// Determine backend type from environment or auto-detect
+	backendTypeStr := os.Getenv("BACKEND_TYPE")
+	var backendType BackendType
+	if backendTypeStr != "" {
+		backendType = BackendType(backendTypeStr)
+	} else {
+		backendType = BackendTypeAuto // Auto-detect
 	}
 
 	// Create test backend
 	cfg := &Config{
 		Address: vaultAddr,
 		Token:   vaultToken,
-		Type:    BackendTypeVault,
+		Type:    backendType,
 	}
 
 	var err error
 	testBackend, err = NewBackend(ctx, cfg, testLogger)
 	if err != nil {
 		testLogger.Error("Failed to create test backend", "error", err)
-		vaultContainer.Terminate(ctx)
 		os.Exit(1)
 	}
 
-	testLogger.Info("Integration test environment ready", "vault_addr", vaultAddr)
+	testLogger.Info("Integration test environment ready",
+		"vault_addr", vaultAddr,
+		"backend_type", testBackend.Type())
 
 	// Run tests
 	code := m.Run()
 
-	// Cleanup
-	if vaultContainer != nil {
-		if err := vaultContainer.Terminate(ctx); err != nil {
-			testLogger.Error("Failed to terminate Vault container", "error", err)
-		}
-	}
-
 	os.Exit(code)
 }
 
-// setupVaultContainer starts a Vault container using testcontainers
-func setupVaultContainer(ctx context.Context) error {
-	req := testcontainers.ContainerRequest{
-		Image:        "hashicorp/vault:1.15.0",
-		ExposedPorts: []string{"8200/tcp"},
-		Env: map[string]string{
-			"VAULT_DEV_ROOT_TOKEN_ID":  vaultToken,
-			"VAULT_DEV_LISTEN_ADDRESS": "0.0.0.0:8200",
-			"VAULT_ADDR":               "http://0.0.0.0:8200",
-		},
-		WaitingFor: wait.ForLog("Vault server started!").WithStartupTimeout(30 * time.Second),
-	}
-
-	var err error
-	vaultContainer, err = testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
-		ContainerRequest: req,
-		Started:          true,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to start container: %w", err)
-	}
-
-	// Get mapped port
-	host, err := vaultContainer.Host(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get container host: %w", err)
-	}
-
-	port, err := vaultContainer.MappedPort(ctx, "8200")
-	if err != nil {
-		return fmt.Errorf("failed to get mapped port: %w", err)
-	}
-
-	vaultAddr = fmt.Sprintf("http://%s:%s", host, port.Port())
-
-	// Wait a bit more for Vault to be fully ready
-	time.Sleep(2 * time.Second)
-
-	return nil
-}
-
-// initializeVault configures PKI and auth methods in the test Vault instance
+// initializeVault configures PKI and auth methods in the Vault instance
+// This function is idempotent - it's safe to run multiple times
 func initializeVault(ctx context.Context) error {
 	apiConfig := api.DefaultConfig()
 	apiConfig.Address = vaultAddr
+
+	// Handle TLS verification
+	if os.Getenv("VAULT_SKIP_VERIFY") == "true" {
+		// For dev/test environments only
+		testLogger.Warn("TLS verification disabled (VAULT_SKIP_VERIFY=true)")
+	}
 
 	client, err := api.NewClient(apiConfig)
 	if err != nil {
@@ -138,38 +126,72 @@ func initializeVault(ctx context.Context) error {
 
 	client.SetToken(vaultToken)
 
-	// Enable PKI secrets engine
-	if err := client.Sys().Mount("pki", &api.MountInput{
-		Type: "pki",
-		Config: api.MountConfigInput{
-			MaxLeaseTTL: "87600h", // 10 years
-		},
-	}); err != nil {
-		return fmt.Errorf("failed to mount PKI: %w", err)
-	}
-
-	// Generate root CA
-	_, err = client.Logical().Write("pki/root/generate/internal", map[string]interface{}{
-		"common_name": "Test Root CA",
-		"ttl":         "87600h",
-		"key_type":    "rsa",
-		"key_bits":    2048,
-	})
+	// Check if PKI mount already exists
+	mounts, err := client.Sys().ListMounts()
 	if err != nil {
-		return fmt.Errorf("failed to generate root CA: %w", err)
+		return fmt.Errorf("failed to list mounts: %w", err)
 	}
 
-	// Configure CA and CRL URLs
-	_, err = client.Logical().Write("pki/config/urls", map[string]interface{}{
-		"issuing_certificates":    []string{vaultAddr + "/v1/pki/ca"},
-		"crl_distribution_points": []string{vaultAddr + "/v1/pki/crl"},
-	})
+	pkiMountPath := pkiMount + "/"
+	pkiExists := false
+	if _, ok := mounts[pkiMountPath]; ok {
+		pkiExists = true
+		testLogger.Info("PKI mount already exists, skipping creation", "mount", pkiMount)
+	}
+
+	if !pkiExists {
+		// Enable PKI secrets engine
+		if err := client.Sys().Mount(pkiMount, &api.MountInput{
+			Type: "pki",
+			Config: api.MountConfigInput{
+				MaxLeaseTTL: "87600h", // 10 years
+			},
+		}); err != nil {
+			return fmt.Errorf("failed to mount PKI: %w", err)
+		}
+		testLogger.Info("Created PKI mount", "mount", pkiMount)
+	}
+
+	// Check if root CA exists (idempotent check)
+	caResp, err := client.Logical().Read(pkiMount + "/cert/ca")
 	if err != nil {
-		return fmt.Errorf("failed to configure URLs: %w", err)
+		// Error might mean mount doesn't have a CA yet, which is fine
+		testLogger.Debug("No existing CA found", "error", err)
 	}
 
-	// Create a role for testing
-	_, err = client.Logical().Write("pki/roles/test-role", map[string]interface{}{
+	caExists := false
+	if caResp != nil && caResp.Data != nil {
+		if certPEM, ok := caResp.Data["certificate"].(string); ok && len(certPEM) > 100 {
+			caExists = true
+			testLogger.Info("Root CA already exists, skipping generation", "mount", pkiMount)
+		}
+	}
+
+	if !caExists {
+		// Generate root CA
+		_, err = client.Logical().Write(pkiMount+"/root/generate/internal", map[string]interface{}{
+			"common_name": "Test Root CA",
+			"ttl":         "87600h",
+			"key_type":    "rsa",
+			"key_bits":    2048,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to generate root CA: %w", err)
+		}
+		testLogger.Info("Generated root CA", "mount", pkiMount)
+
+		// Configure CA and CRL URLs
+		_, err = client.Logical().Write(pkiMount+"/config/urls", map[string]interface{}{
+			"issuing_certificates":    []string{vaultAddr + "/v1/" + pkiMount + "/ca"},
+			"crl_distribution_points": []string{vaultAddr + "/v1/" + pkiMount + "/crl"},
+		})
+		if err != nil {
+			return fmt.Errorf("failed to configure URLs: %w", err)
+		}
+	}
+
+	// Create/update roles (idempotent)
+	_, err = client.Logical().Write(pkiMount+"/roles/test-role", map[string]interface{}{
 		"allowed_domains":    []string{"example.com", "test.local"},
 		"allow_subdomains":   true,
 		"allow_bare_domains": true,
@@ -178,45 +200,68 @@ func initializeVault(ctx context.Context) error {
 		"key_bits":           2048,
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create role: %w", err)
+		return fmt.Errorf("failed to create/update test-role: %w", err)
 	}
 
-	// Create a role with shorter TTL for testing
-	_, err = client.Logical().Write("pki/roles/short-ttl", map[string]interface{}{
+	_, err = client.Logical().Write(pkiMount+"/roles/short-ttl", map[string]interface{}{
 		"allowed_domains":  []string{"short.example.com"},
 		"allow_subdomains": true,
 		"max_ttl":          "1h",
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create short-ttl role: %w", err)
+		return fmt.Errorf("failed to create/update short-ttl role: %w", err)
 	}
 
-	// Enable userpass auth
-	if err := client.Sys().EnableAuth("userpass", "userpass", ""); err != nil {
-		return fmt.Errorf("failed to enable userpass: %w", err)
+	// Check if userpass auth already exists
+	auths, err := client.Sys().ListAuth()
+	if err != nil {
+		return fmt.Errorf("failed to list auth methods: %w", err)
 	}
 
-	// Create test user
+	userpassExists := false
+	if _, ok := auths["userpass/"]; ok {
+		userpassExists = true
+		testLogger.Info("Userpass auth already exists, skipping creation")
+	}
+
+	if !userpassExists {
+		// Enable userpass auth
+		if err := client.Sys().EnableAuth("userpass", "userpass", ""); err != nil {
+			return fmt.Errorf("failed to enable userpass: %w", err)
+		}
+		testLogger.Info("Enabled userpass auth")
+	}
+
+	// Create/update test users (idempotent)
 	_, err = client.Logical().Write("auth/userpass/users/testuser", map[string]interface{}{
 		"password": "testpass",
 		"policies": []string{"default"},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create test user: %w", err)
+		return fmt.Errorf("failed to create/update testuser: %w", err)
 	}
 
-	// Create another test user for failure tests
 	_, err = client.Logical().Write("auth/userpass/users/anotheruser", map[string]interface{}{
 		"password": "anotherpass",
 		"policies": []string{"default"},
 	})
 	if err != nil {
-		return fmt.Errorf("failed to create another test user: %w", err)
+		return fmt.Errorf("failed to create/update anotheruser: %w", err)
 	}
 
-	// Enable cert auth
-	if err := client.Sys().EnableAuth("cert", "cert", ""); err != nil {
-		return fmt.Errorf("failed to enable cert auth: %w", err)
+	// Check if cert auth already exists
+	certExists := false
+	if _, ok := auths["cert/"]; ok {
+		certExists = true
+		testLogger.Info("Cert auth already exists, skipping creation")
+	}
+
+	if !certExists {
+		// Enable cert auth
+		if err := client.Sys().EnableAuth("cert", "cert", ""); err != nil {
+			return fmt.Errorf("failed to enable cert auth: %w", err)
+		}
+		testLogger.Info("Enabled cert auth")
 	}
 
 	testLogger.Info("Vault initialization complete")
@@ -282,7 +327,7 @@ func TestIntegration_Health(t *testing.T) {
 func TestIntegration_GetCACertificate(t *testing.T) {
 	ctx := context.Background()
 
-	cert, err := testBackend.GetCACertificate(ctx, "pki")
+	cert, err := testBackend.GetCACertificate(ctx, pkiMount)
 	if err != nil {
 		t.Fatalf("GetCACertificate() failed: %v", err)
 	}
@@ -318,7 +363,7 @@ func TestIntegration_GetCACertificate_InvalidMount(t *testing.T) {
 func TestIntegration_GetCAChain(t *testing.T) {
 	ctx := context.Background()
 
-	chain, err := testBackend.GetCAChain(ctx, "pki")
+	chain, err := testBackend.GetCAChain(ctx, pkiMount)
 	if err != nil {
 		t.Fatalf("GetCAChain() failed: %v", err)
 	}
@@ -344,7 +389,7 @@ func TestIntegration_SignCSR(t *testing.T) {
 		t.Fatalf("Failed to generate CSR: %v", err)
 	}
 
-	cert, err := testBackend.SignCSR(ctx, "pki", "test-role", csr, "24h")
+	cert, err := testBackend.SignCSR(ctx, pkiMount, "test-role", csr, "24h")
 	if err != nil {
 		t.Fatalf("SignCSR() failed: %v", err)
 	}
@@ -375,7 +420,7 @@ func TestIntegration_SignCSR_WithCustomTTL(t *testing.T) {
 		t.Fatalf("Failed to generate CSR: %v", err)
 	}
 
-	cert, err := testBackend.SignCSR(ctx, "pki", "test-role", csr, "48h")
+	cert, err := testBackend.SignCSR(ctx, pkiMount, "test-role", csr, "48h")
 	if err != nil {
 		t.Fatalf("SignCSR() failed: %v", err)
 	}
@@ -397,7 +442,7 @@ func TestIntegration_SignCSR_InvalidRole(t *testing.T) {
 		t.Fatalf("Failed to generate CSR: %v", err)
 	}
 
-	_, err = testBackend.SignCSR(ctx, "pki", "nonexistent-role", csr, "")
+	_, err = testBackend.SignCSR(ctx, pkiMount, "nonexistent-role", csr, "")
 	if err == nil {
 		t.Fatal("Expected error for invalid role, got nil")
 	}
@@ -414,7 +459,7 @@ func TestIntegration_SignCSR_InvalidDomain(t *testing.T) {
 		t.Fatalf("Failed to generate CSR: %v", err)
 	}
 
-	_, err = testBackend.SignCSR(ctx, "pki", "test-role", csr, "")
+	_, err = testBackend.SignCSR(ctx, pkiMount, "test-role", csr, "")
 	if err == nil {
 		t.Fatal("Expected error for disallowed domain, got nil")
 	}
@@ -431,7 +476,7 @@ func TestIntegration_SignCSRVerbatim(t *testing.T) {
 		t.Fatalf("Failed to generate CSR: %v", err)
 	}
 
-	cert, err := testBackend.SignCSRVerbatim(ctx, "pki", csr, "12h")
+	cert, err := testBackend.SignCSRVerbatim(ctx, pkiMount, csr, "12h")
 	if err != nil {
 		t.Fatalf("SignCSRVerbatim() failed: %v", err)
 	}
@@ -452,7 +497,7 @@ func TestIntegration_GetIssuerPEM(t *testing.T) {
 	ctx := context.Background()
 
 	// Get the default issuer (should be "default" or similar)
-	pem, err := testBackend.GetIssuerPEM(ctx, "pki", "default")
+	pem, err := testBackend.GetIssuerPEM(ctx, pkiMount, "default")
 	if err != nil {
 		t.Fatalf("GetIssuerPEM() failed: %v", err)
 	}
@@ -486,7 +531,7 @@ func TestIntegration_AuthenticateUserpass(t *testing.T) {
 		t.Fatal("Expected token, got empty string")
 	}
 
-	t.Logf("Received token: %s", token[:10]+"...")
+	t.Logf("Received token: %s", token[:min(10, len(token))]+"...")
 }
 
 // TestIntegration_AuthenticateUserpass_InvalidPassword tests authentication with wrong password
@@ -611,12 +656,22 @@ func TestIntegration_CloneWithToken(t *testing.T) {
 func TestIntegration_Type(t *testing.T) {
 	backendType := testBackend.Type()
 
-	if backendType != BackendTypeVault {
-		t.Errorf("Expected BackendTypeVault, got %v", backendType)
+	// Should be either Vault or OpenBao depending on what's running
+	if backendType != BackendTypeVault && backendType != BackendTypeOpenBao {
+		t.Errorf("Expected BackendTypeVault or BackendTypeOpenBao, got %v", backendType)
 	}
+
+	t.Logf("Backend type: %s", backendType)
 }
 
 // Helper functions
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
 
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && containsHelper(s, substr))

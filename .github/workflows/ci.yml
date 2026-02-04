@@ -7,8 +7,8 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    name: Test
+  test-unit:
+    name: Unit Tests
     runs-on: ubuntu-latest
 
     steps:
@@ -32,14 +32,83 @@ jobs:
         run: go mod download
 
       - name: Run unit tests
-        run: make test
+        run: make test-unit
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: ./coverage.out
           flags: unittests
-          name: codecov
+          name: codecov-unit
+          token: ${{ secrets.CODECOV_TOKEN }}
+        continue-on-error: true # Don't fail if Codecov token is not set
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    # Note: Uses OpenBao for integration testing (open-source alternative to Vault)
+    # The EST service is backend-agnostic and works with both Vault and OpenBao
+
+    services:
+      openbao:
+        image: quay.io/openbao/openbao:latest
+        env:
+          OPENBAO_DEV_ROOT_TOKEN_ID: root-token
+          OPENBAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+          SKIP_SETCAP: true
+        ports:
+          - 8200:8200
+        options: >-
+          --cap-add=IPC_LOCK
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup tools
+        uses: jdx/mise-action@v2
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Wait for OpenBao
+        run: |
+          echo "Waiting for OpenBao to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8200/v1/sys/health >/dev/null 2>&1; then
+              echo "OpenBao is ready"
+              exit 0
+            fi
+            echo "Waiting for OpenBao... ($i/30)"
+            sleep 2
+          done
+          echo "OpenBao failed to start"
+          exit 1
+
+      - name: Run integration tests
+        env:
+          BAO_ADDR: http://localhost:8200
+          BAO_TOKEN: root-token
+          VAULT_ADDR: http://localhost:8200
+          VAULT_TOKEN: root-token
+        run: make test-integration
+
+      - name: Upload integration test coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage_integration.out
+          flags: integration
+          name: codecov-integration
           token: ${{ secrets.CODECOV_TOKEN }}
         continue-on-error: true # Don't fail if Codecov token is not set
 
@@ -98,91 +167,3 @@ jobs:
           tags: est-service:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  # integration-test:
-  #   name: Integration Tests
-  #   runs-on: ubuntu-latest
-  #   # Note: Uses HashiCorp Vault for integration testing due to GitHub Actions service availability
-  #   # The EST service is backend-agnostic and works with both Vault and OpenBao
-
-  #   services:
-  #     vault:
-  #       image: hashicorp/vault:latest
-  #       env:
-  #         VAULT_DEV_ROOT_TOKEN_ID: root-token
-  #         VAULT_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
-  #       ports:
-  #         - 8200:8200
-  #       options: >-
-  #         --health-cmd "vault status"
-  #         --health-interval 10s
-  #         --health-timeout 5s
-  #         --health-retries 5
-
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
-
-  #     - name: Set up Go
-  #       uses: actions/setup-go@v5
-  #       with:
-  #         go-version: "1.25.6"
-
-  #     - name: Wait for Vault
-  #       run: |
-  #         for i in {1..30}; do
-  #           if curl -s http://localhost:8200/v1/sys/health >/dev/null 2>&1; then
-  #             echo "Vault is ready"
-  #             break
-  #           fi
-  #           echo "Waiting for Vault... ($i/30)"
-  #           sleep 2
-  #         done
-
-  #     - name: Setup Vault PKI for testing
-  #       env:
-  #         VAULT_ADDR: http://localhost:8200
-  #         VAULT_TOKEN: root-token
-  #       run: |
-  #         # Enable PKI secrets engine
-  #         vault secrets enable pki
-  #         vault secrets tune -max-lease-ttl=87600h pki
-
-  #         # Generate root CA
-  #         vault write -field=certificate pki/root/generate/internal \
-  #           common_name="Test Root CA" \
-  #           ttl=87600h > ca.crt
-
-  #         # Configure CA and CRL URLs
-  #         vault write pki/config/urls \
-  #           issuing_certificates="http://localhost:8200/v1/pki/ca" \
-  #           crl_distribution_points="http://localhost:8200/v1/pki/crl"
-
-  #         # Create a role for testing
-  #         vault write pki/roles/test-role \
-  #           allowed_domains="example.com,test.local" \
-  #           allow_subdomains=true \
-  #           max_ttl=72h \
-  #           key_type=rsa \
-  #           key_bits=2048
-
-  #         # Enable userpass auth
-  #         vault auth enable userpass
-  #         vault write auth/userpass/users/testuser \
-  #           password=testpass \
-  #           policies=default
-
-  #         # Create policy for PKI access
-  #         vault policy write pki-policy - <<EOF
-  #         path "pki/*" {
-  #           capabilities = ["create", "read", "update", "delete", "list"]
-  #         }
-  #         EOF
-
-  #         vault write auth/userpass/users/testuser policies=pki-policy
-
-  #     - name: Run integration tests
-  #       env:
-  #         VAULT_ADDR: http://localhost:8200
-  #         VAULT_TOKEN: root-token
-  #       run: go test -v -race ./test/integration/...

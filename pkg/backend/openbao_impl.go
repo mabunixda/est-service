@@ -143,8 +143,9 @@ func (b *openBaoBackend) GetAPIClient() *api.Client {
 
 // GetCACertificate retrieves the CA certificate from a PKI mount
 func (b *openBaoBackend) GetCACertificate(ctx context.Context, mount string) (*x509.Certificate, error) {
-	path := fmt.Sprintf("%s/ca", mount)
+	path := fmt.Sprintf("%s/cert/ca", mount)
 
+	// PKI cert/ca endpoint returns JSON with certificate in PEM format
 	secret, err := b.client.Logical().ReadWithContext(ctx, path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA certificate: %w", err)
@@ -337,21 +338,27 @@ func (b *openBaoBackend) SignCSRVerbatim(ctx context.Context, mount string, csr 
 func (b *openBaoBackend) GetIssuerPEM(ctx context.Context, mount, issuer string) (string, error) {
 	path := fmt.Sprintf("%s/issuer/%s/pem", mount, issuer)
 
-	secret, err := b.client.Logical().ReadWithContext(ctx, path)
+	// PKI issuer PEM endpoint returns raw PEM, not JSON
+	rawResp, err := b.client.Logical().ReadRawWithContext(ctx, path)
 	if err != nil {
 		return "", fmt.Errorf("failed to read issuer: %w", err)
 	}
+	defer func() {
+		if closeErr := rawResp.Body.Close(); closeErr != nil {
+			b.logger.Warn("Failed to close response body", "error", closeErr)
+		}
+	}()
 
-	if secret == nil || secret.Data == nil {
+	if rawResp == nil {
 		return "", fmt.Errorf("no issuer data returned")
 	}
 
-	certPEM, ok := secret.Data["certificate"].(string)
-	if !ok {
-		return "", fmt.Errorf("certificate not found in response")
+	certPEM, err := io.ReadAll(rawResp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read issuer PEM body: %w", err)
 	}
 
-	return certPEM, nil
+	return string(certPEM), nil
 }
 
 // ========== Authentication Operations ==========

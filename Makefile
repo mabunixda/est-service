@@ -42,10 +42,12 @@ test: test-unit
 test-unit:
 	go test -v -coverprofile=coverage.out ./...
 
-# Integration tests (requires Docker)
+# Integration tests (requires running OpenBao/Vault instance)
 test-integration:
 	@echo "Running integration tests..."
-	go test -v -coverprofile=coverage_integration.out -tags=integration -timeout 5m ./pkg/backend
+	@echo "Note: Integration tests require a running OpenBao/Vault instance."
+	@echo "Set BAO_ADDR, BAO_TOKEN, VAULT_ADDR, VAULT_TOKEN environment variables."
+	go test -v -coverprofile=coverage_integration.out -tags=integration -timeout 5m ./pkg/backend ./test/integration
 
 # All tests including integration
 test-all: test-unit test-integration

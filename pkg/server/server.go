@@ -56,16 +56,17 @@ type Config struct {
 	CSRAttrsOIDs     []string
 
 	// RFC 7030 Section 4.4 - Server-side key generation
-	ServerKeyGenEnabled         bool
-	ServerKeyGenKeyType         string
-	ServerKeyGenKeySize         int
-	ServerKeyGenAllowedTypes    []string
-	ServerKeyGenAllowedSizes    []int
-	ServerKeyGenMaxCSRSize      int
-	ServerKeyGenUseAuthToken    *bool // Pointer to detect if explicitly set (nil = default to true)
-	ServerKeyGenEncryptKey      bool
-	ServerKeyGenUseVaultTransit bool   // Use Vault/OpenBao Transit for key generation
-	ServerKeyGenTransitMount    string // Transit engine mount path (default: "transit")
+	ServerKeyGenEnabled              bool
+	ServerKeyGenKeyType              string
+	ServerKeyGenKeySize              int
+	ServerKeyGenAllowedTypes         []string
+	ServerKeyGenAllowedSizes         []int
+	ServerKeyGenMaxCSRSize           int
+	ServerKeyGenUseAuthToken         *bool // Pointer to detect if explicitly set (nil = default to true)
+	ServerKeyGenEncryptKey           bool
+	ServerKeyGenUseVaultTransit      bool   // Use Vault/OpenBao Transit for key generation
+	ServerKeyGenTransitMount         string // Transit engine mount path (default: "transit")
+	ServerKeyGenTransitKeyNamePrefix string // Prefix for temporary Transit key names (default: "temp-keygen-")
 }
 
 // TLSConfig holds TLS configuration
@@ -292,19 +293,20 @@ func (s *Server) setupRoutes() *http.ServeMux {
 		}
 
 		serverKeyGenCfg := &handlers.ServerKeyGenConfig{
-			Enabled:           s.config.ServerKeyGenEnabled,
-			DefaultKeyType:    s.config.ServerKeyGenKeyType,
-			DefaultKeySize:    s.config.ServerKeyGenKeySize,
-			DefaultMount:      s.config.PKIMount,
-			Labels:            s.config.EnrollmentConfig.Labels,
-			DefaultPolicy:     s.config.EnrollmentConfig.DefaultPolicy,
-			MaxCSRSize:        int64(s.config.ServerKeyGenMaxCSRSize),
-			AllowedKeyTypes:   s.config.ServerKeyGenAllowedTypes,
-			AllowedKeySizes:   s.config.ServerKeyGenAllowedSizes,
-			UseAuthToken:      useAuthToken,
-			EncryptPrivateKey: s.config.ServerKeyGenEncryptKey,
-			UseVaultTransit:   s.config.ServerKeyGenUseVaultTransit,
-			TransitMount:      s.config.ServerKeyGenTransitMount,
+			Enabled:              s.config.ServerKeyGenEnabled,
+			DefaultKeyType:       s.config.ServerKeyGenKeyType,
+			DefaultKeySize:       s.config.ServerKeyGenKeySize,
+			DefaultMount:         s.config.PKIMount,
+			Labels:               s.config.EnrollmentConfig.Labels,
+			DefaultPolicy:        s.config.EnrollmentConfig.DefaultPolicy,
+			MaxCSRSize:           int64(s.config.ServerKeyGenMaxCSRSize),
+			AllowedKeyTypes:      s.config.ServerKeyGenAllowedTypes,
+			AllowedKeySizes:      s.config.ServerKeyGenAllowedSizes,
+			UseAuthToken:         useAuthToken,
+			EncryptPrivateKey:    s.config.ServerKeyGenEncryptKey,
+			UseVaultTransit:      s.config.ServerKeyGenUseVaultTransit,
+			TransitMount:         s.config.ServerKeyGenTransitMount,
+			TransitKeyNamePrefix: s.config.ServerKeyGenTransitKeyNamePrefix,
 		}
 
 		// Set defaults if not configured

@@ -1,9 +1,13 @@
+//go:build integration
+// +build integration
+
 package integration
 
 import (
 	"encoding/base64"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,7 +103,7 @@ func TestCACertsRetrieval(t *testing.T) {
 		}
 
 		contentType := resp.Header.Get("Content-Type")
-		if contentType != "application/pkcs7-mime" {
+		if !strings.HasPrefix(contentType, "application/pkcs7-mime") {
 			t.Errorf("Wrong content type: got %s, want application/pkcs7-mime", contentType)
 		}
 
