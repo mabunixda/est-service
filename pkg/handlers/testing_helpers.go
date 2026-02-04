@@ -129,6 +129,11 @@ func (m *mockBackendHandlers) CreateTokenForEntity(ctx context.Context, entityID
 	return "test-entity-token", nil
 }
 
+func (m *mockBackendHandlers) GenerateExportableKey(ctx context.Context, transitMount, keyType string, keyBits int) (interface{}, interface{}, error) {
+	// Not implemented in mock - tests can override if needed
+	return nil, nil, nil
+}
+
 func (m *mockBackendHandlers) GetAPIClient() *api.Client {
 	return nil
 }

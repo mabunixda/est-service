@@ -37,6 +37,9 @@ type MockBackend struct {
 	CreateOrUpdateEntityAliasFunc func(ctx context.Context, entityID, aliasName, mountAccessor string) (string, error)
 	CreateTokenForEntityFunc      func(ctx context.Context, entityID string, policies []string, ttl string) (string, error)
 
+	// Transit Operations
+	GenerateExportableKeyFunc func(ctx context.Context, transitMount, keyType string, keyBits int) (interface{}, interface{}, error)
+
 	// Client Access
 	GetAPIClientFunc func() *api.Client
 
@@ -185,6 +188,15 @@ func (m *MockBackend) CreateTokenForEntity(ctx context.Context, entityID string,
 	return "mock-token", nil
 }
 
+// GenerateExportableKey implements Backend.GenerateExportableKey
+func (m *MockBackend) GenerateExportableKey(ctx context.Context, transitMount, keyType string, keyBits int) (interface{}, interface{}, error) {
+	if m.GenerateExportableKeyFunc != nil {
+		return m.GenerateExportableKeyFunc(ctx, transitMount, keyType, keyBits)
+	}
+	// Return nil to indicate the feature is not being mocked
+	return nil, nil, nil
+}
+
 // GetAPIClient implements Backend.GetAPIClient
 func (m *MockBackend) GetAPIClient() *api.Client {
 	if m.GetAPIClientFunc != nil {
@@ -217,6 +229,7 @@ func (m *MockBackend) CloneWithToken(ctx context.Context, token string) (Backend
 		CreateOrUpdateEntityFunc:      m.CreateOrUpdateEntityFunc,
 		CreateOrUpdateEntityAliasFunc: m.CreateOrUpdateEntityAliasFunc,
 		CreateTokenForEntityFunc:      m.CreateTokenForEntityFunc,
+		GenerateExportableKeyFunc:     m.GenerateExportableKeyFunc,
 		GetAPIClientFunc:              m.GetAPIClientFunc,
 		CloneWithTokenFunc:            m.CloneWithTokenFunc,
 		CloseFunc:                     m.CloseFunc,

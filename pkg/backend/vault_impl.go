@@ -811,3 +811,98 @@ func (b *vaultBackend) Close() error {
 	}
 	return nil
 }
+
+// GenerateExportableKey creates a temporary exportable key in the Transit engine,
+// exports the private key, and then deletes the Transit key.
+// This allows Vault to generate keys in a secure environment while still
+// allowing the EST service to deliver them to clients.
+func (b *vaultBackend) GenerateExportableKey(ctx context.Context, transitMount, keyType string, keyBits int) (interface{}, interface{}, error) {
+	requestID := observability.RequestIDFromContext(ctx)
+
+	// Generate a unique temporary key name
+	keyName := fmt.Sprintf("temp-keygen-%d", time.Now().UnixNano())
+
+	b.logger.Debug("Generating exportable key in Transit engine",
+		"request_id", requestID,
+		"transit_mount", transitMount,
+		"key_name", keyName,
+		"key_type", keyType,
+		"key_bits", keyBits)
+
+	// Map keyType and keyBits to Transit engine type
+	transitType, err := mapToTransitKeyType(keyType, keyBits)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid key type/size: %w", err)
+	}
+
+	// 1. Create temporary Transit key (exportable)
+	keyPath := fmt.Sprintf("%s/keys/%s", transitMount, keyName)
+	_, err = b.client.Logical().WriteWithContext(ctx, keyPath, map[string]interface{}{
+		"type":       transitType,
+		"exportable": true,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to create Transit key: %w", err)
+	}
+
+	// Ensure cleanup - delete the Transit key when done
+	defer func() {
+		deletePath := fmt.Sprintf("%s/keys/%s", transitMount, keyName)
+		// First, configure the key to allow deletion
+		configPath := fmt.Sprintf("%s/keys/%s/config", transitMount, keyName)
+		_, _ = b.client.Logical().WriteWithContext(context.Background(), configPath, map[string]interface{}{
+			"deletion_allowed": true,
+		})
+		// Then delete it
+		_, delErr := b.client.Logical().DeleteWithContext(context.Background(), deletePath)
+		if delErr != nil {
+			b.logger.Warn("Failed to delete temporary Transit key",
+				"request_id", requestID,
+				"key_name", keyName,
+				"error", delErr)
+		} else {
+			b.logger.Debug("Deleted temporary Transit key",
+				"request_id", requestID,
+				"key_name", keyName)
+		}
+	}()
+
+	// 2. Export the private key
+	exportPath := fmt.Sprintf("%s/export/encryption-key/%s/latest", transitMount, keyName)
+	exportResp, err := b.client.Logical().ReadWithContext(ctx, exportPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to export Transit key: %w", err)
+	}
+
+	if exportResp == nil || exportResp.Data == nil {
+		return nil, nil, fmt.Errorf("empty response from Transit export")
+	}
+
+	// Extract the exported key
+	keysData, ok := exportResp.Data["keys"].(map[string]interface{})
+	if !ok {
+		return nil, nil, fmt.Errorf("invalid keys data in Transit export response")
+	}
+
+	keyPEM, ok := keysData["1"].(string)
+	if !ok {
+		return nil, nil, fmt.Errorf("missing key version 1 in Transit export response")
+	}
+
+	b.logger.Debug("Successfully exported key from Transit",
+		"request_id", requestID,
+		"key_name", keyName)
+
+	// 3. Parse the exported PEM key
+	privateKey, publicKey, err := parseExportedKey(keyPEM)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse exported key: %w", err)
+	}
+
+	b.logger.Info("Successfully generated exportable key via Transit",
+		"request_id", requestID,
+		"key_type", keyType,
+		"key_bits", keyBits)
+
+	return privateKey, publicKey, nil
+}

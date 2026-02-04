@@ -75,6 +75,8 @@ est:
     default_key_size: 2048 # RSA: 2048, 3072, 4096; ECDSA: 256, 384, 521
     max_csr_size: 4096 # Maximum CSR size for serverkeygen requests
     use_auth_token: true # Use authenticated token for PKI operations
+    use_vault_transit: false # Use Vault Transit for key generation (default: false)
+    transit_mount: "transit" # Transit engine mount path
 
 observability:
   metrics:

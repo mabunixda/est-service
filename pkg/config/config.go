@@ -149,14 +149,17 @@ type CSRAttributesConfig struct {
 // return both the certificate and encrypted private key to the client.
 // WARNING: This transmits private keys over the network - ensure strong TLS is configured!
 type ServerKeyGenConfig struct {
-	Enabled           bool     `yaml:"enabled"`             // Enable /serverkeygen endpoint
-	DefaultKeyType    string   `yaml:"default_key_type"`    // "rsa" or "ecdsa" (default: "rsa")
-	DefaultKeySize    int      `yaml:"default_key_size"`    // RSA: 2048, 3072, 4096; ECDSA: 256, 384, 521 (default: 2048 for RSA)
-	AllowedKeyTypes   []string `yaml:"allowed_key_types"`   // Restrict key types (empty = all allowed)
-	AllowedKeySizes   []int    `yaml:"allowed_key_sizes"`   // Restrict key sizes (empty = all allowed)
-	MaxCSRSize        int      `yaml:"max_csr_size"`        // Maximum CSR size in bytes (default: 4096)
-	UseAuthToken      *bool    `yaml:"use_auth_token"`      // Use authenticated token for PKI operations (default: true if not specified)
-	EncryptPrivateKey bool     `yaml:"encrypt_private_key"` // Encrypt private key in response (default: false, not widely supported)
+	Enabled              bool     `yaml:"enabled"`                 // Enable /serverkeygen endpoint
+	DefaultKeyType       string   `yaml:"default_key_type"`        // "rsa" or "ecdsa" (default: "rsa")
+	DefaultKeySize       int      `yaml:"default_key_size"`        // RSA: 2048, 3072, 4096; ECDSA: 256, 384, 521 (default: 2048 for RSA)
+	AllowedKeyTypes      []string `yaml:"allowed_key_types"`       // Restrict key types (empty = all allowed)
+	AllowedKeySizes      []int    `yaml:"allowed_key_sizes"`       // Restrict key sizes (empty = all allowed)
+	MaxCSRSize           int      `yaml:"max_csr_size"`            // Maximum CSR size in bytes (default: 4096)
+	UseAuthToken         *bool    `yaml:"use_auth_token"`          // Use authenticated token for PKI operations (default: true if not specified)
+	EncryptPrivateKey    bool     `yaml:"encrypt_private_key"`     // Encrypt private key in response (default: false, not widely supported)
+	UseVaultTransit      bool     `yaml:"use_vault_transit"`       // Use Vault/OpenBao Transit engine for key generation (default: false)
+	TransitMount         string   `yaml:"transit_mount"`           // Transit engine mount path (default: "transit")
+	TransitKeyNamePrefix string   `yaml:"transit_key_name_prefix"` // Prefix for temporary Transit key names (default: "temp-keygen-")
 }
 
 // ObservabilityConfig configures monitoring and logging

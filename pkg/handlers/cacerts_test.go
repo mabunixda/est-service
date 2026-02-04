@@ -145,6 +145,10 @@ func (m *mockBackend) GetAPIClient() *api.Client {
 	return nil
 }
 
+func (m *mockBackend) GenerateExportableKey(ctx context.Context, transitMount, keyType string, keyBits int) (interface{}, interface{}, error) {
+	return nil, nil, nil
+}
+
 func (m *mockBackend) CloneWithToken(ctx context.Context, token string) (backend.Backend, error) {
 	if m.cloneWithTokenFunc != nil {
 		return m.cloneWithTokenFunc(ctx, token)

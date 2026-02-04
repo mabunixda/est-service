@@ -135,6 +135,10 @@ func (m *mockServerKeyGenBackend) GetAPIClient() *api.Client {
 	return nil
 }
 
+func (m *mockServerKeyGenBackend) GenerateExportableKey(ctx context.Context, transitMount, keyType string, keyBits int) (interface{}, interface{}, error) {
+	return nil, nil, nil
+}
+
 func (m *mockServerKeyGenBackend) Type() backend.BackendType {
 	return backend.BackendTypeOpenBao
 }

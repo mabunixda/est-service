@@ -124,6 +124,12 @@ func (c *Client) CreateTokenForEntity(ctx context.Context, entityID string, poli
 	return c.backend.CreateTokenForEntity(ctx, entityID, policies, ttl)
 }
 
+// GenerateExportableKey generates a private key using the Transit secrets engine
+// The key is created as exportable, exported, and then deleted from Vault/OpenBao
+func (c *Client) GenerateExportableKey(ctx context.Context, transitMount, keyType string, keyBits int) (interface{}, interface{}, error) {
+	return c.backend.GenerateExportableKey(ctx, transitMount, keyType, keyBits)
+}
+
 // GetAPIClient returns the underlying API client
 func (c *Client) GetAPIClient() *api.Client {
 	return c.backend.GetAPIClient()

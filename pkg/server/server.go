@@ -56,14 +56,16 @@ type Config struct {
 	CSRAttrsOIDs     []string
 
 	// RFC 7030 Section 4.4 - Server-side key generation
-	ServerKeyGenEnabled      bool
-	ServerKeyGenKeyType      string
-	ServerKeyGenKeySize      int
-	ServerKeyGenAllowedTypes []string
-	ServerKeyGenAllowedSizes []int
-	ServerKeyGenMaxCSRSize   int
-	ServerKeyGenUseAuthToken *bool // Pointer to detect if explicitly set (nil = default to true)
-	ServerKeyGenEncryptKey   bool
+	ServerKeyGenEnabled         bool
+	ServerKeyGenKeyType         string
+	ServerKeyGenKeySize         int
+	ServerKeyGenAllowedTypes    []string
+	ServerKeyGenAllowedSizes    []int
+	ServerKeyGenMaxCSRSize      int
+	ServerKeyGenUseAuthToken    *bool // Pointer to detect if explicitly set (nil = default to true)
+	ServerKeyGenEncryptKey      bool
+	ServerKeyGenUseVaultTransit bool   // Use Vault/OpenBao Transit for key generation
+	ServerKeyGenTransitMount    string // Transit engine mount path (default: "transit")
 }
 
 // TLSConfig holds TLS configuration
@@ -301,6 +303,8 @@ func (s *Server) setupRoutes() *http.ServeMux {
 			AllowedKeySizes:   s.config.ServerKeyGenAllowedSizes,
 			UseAuthToken:      useAuthToken,
 			EncryptPrivateKey: s.config.ServerKeyGenEncryptKey,
+			UseVaultTransit:   s.config.ServerKeyGenUseVaultTransit,
+			TransitMount:      s.config.ServerKeyGenTransitMount,
 		}
 
 		// Set defaults if not configured

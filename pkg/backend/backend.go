@@ -61,6 +61,16 @@ type Backend interface {
 	// This ensures the token inherits the entity's identity and policies.
 	CreateTokenForEntity(ctx context.Context, entityID string, policies []string, ttl string) (string, error)
 
+	// Transit Operations (for server-side key generation)
+	// GenerateExportableKey creates a temporary exportable key in the Transit engine,
+	// exports the private key, and then deletes the Transit key.
+	// This allows Vault/OpenBao to generate keys in a secure environment while
+	// still allowing the EST service to deliver them to clients.
+	// Supported keyTypes: "rsa", "ecdsa"
+	// For RSA: keyBits should be 2048, 3072, or 4096
+	// For ECDSA: keyBits should be 256, 384, or 521 (curve size)
+	GenerateExportableKey(ctx context.Context, transitMount, keyType string, keyBits int) (privateKey interface{}, publicKey interface{}, err error)
+
 	// Client Access
 	GetAPIClient() *api.Client
 

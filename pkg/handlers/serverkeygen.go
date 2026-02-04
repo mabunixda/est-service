@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
@@ -33,17 +34,20 @@ type ServerKeyGenHandler struct {
 
 // ServerKeyGenConfig configures server-side key generation
 type ServerKeyGenConfig struct {
-	Enabled           bool
-	DefaultKeyType    string // "rsa" or "ecdsa"
-	DefaultKeySize    int    // RSA: 2048, 3072, 4096; ECDSA: 256, 384, 521
-	DefaultMount      string
-	Labels            map[string]LabelPolicy
-	DefaultPolicy     LabelPolicy
-	MaxCSRSize        int64
-	AllowedKeyTypes   []string // ["rsa", "ecdsa"] - empty means all
-	AllowedKeySizes   []int    // [2048, 3072, 4096, 256, 384, 521] - empty means all
-	UseAuthToken      bool
-	EncryptPrivateKey bool // If true, encrypt private key in PKCS#8
+	Enabled              bool
+	DefaultKeyType       string // "rsa" or "ecdsa"
+	DefaultKeySize       int    // RSA: 2048, 3072, 4096; ECDSA: 256, 384, 521
+	DefaultMount         string
+	Labels               map[string]LabelPolicy
+	DefaultPolicy        LabelPolicy
+	MaxCSRSize           int64
+	AllowedKeyTypes      []string // ["rsa", "ecdsa"] - empty means all
+	AllowedKeySizes      []int    // [2048, 3072, 4096, 256, 384, 521] - empty means all
+	UseAuthToken         bool
+	EncryptPrivateKey    bool   // If true, encrypt private key in PKCS#8
+	UseVaultTransit      bool   // If true, use Vault/OpenBao Transit engine for key generation
+	TransitMount         string // Transit engine mount path (default: "transit")
+	TransitKeyNamePrefix string // Optional prefix for Transit key names (default: "temp-keygen-")
 }
 
 // ServerKeyGenRequest represents the parsed server-side key generation request
@@ -82,6 +86,16 @@ func NewServerKeyGenHandler(backend backend.Backend, authMgr *auth.Manager, conf
 			config.DefaultKeySize = DefaultRSAKeySize
 		} else {
 			config.DefaultKeySize = DefaultECDSAKeySize
+		}
+	}
+
+	// Set Transit defaults if using Vault Transit
+	if config.UseVaultTransit {
+		if config.TransitMount == "" {
+			config.TransitMount = "transit"
+		}
+		if config.TransitKeyNamePrefix == "" {
+			config.TransitKeyNamePrefix = "temp-keygen-"
 		}
 	}
 
@@ -294,6 +308,12 @@ func (h *ServerKeyGenHandler) generateKeyPair() (crypto.PrivateKey, crypto.Publi
 		}
 	}
 
+	// Use Vault/OpenBao Transit engine if configured
+	if h.config.UseVaultTransit {
+		return h.generateKeyPairViaTransit(keyType)
+	}
+
+	// Fallback to local key generation
 	switch keyType {
 	case "rsa":
 		return h.generateRSAKeyPair()
@@ -304,7 +324,33 @@ func (h *ServerKeyGenHandler) generateKeyPair() (crypto.PrivateKey, crypto.Publi
 	}
 }
 
-// generateRSAKeyPair generates an RSA key pair
+// generateKeyPairViaTransit generates a key pair using Vault/OpenBao Transit engine
+func (h *ServerKeyGenHandler) generateKeyPairViaTransit(keyType string) (crypto.PrivateKey, crypto.PublicKey, error) {
+	ctx := context.Background()
+
+	h.logger.Debug("Generating key pair via Vault Transit engine",
+		"key_type", keyType,
+		"key_bits", h.config.DefaultKeySize,
+		"transit_mount", h.config.TransitMount)
+
+	privateKey, publicKey, err := h.backend.GenerateExportableKey(
+		ctx,
+		h.config.TransitMount,
+		keyType,
+		h.config.DefaultKeySize,
+	)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to generate key via Transit: %w", err)
+	}
+
+	h.logger.Info("Successfully generated key pair via Vault Transit",
+		"key_type", keyType,
+		"key_bits", h.config.DefaultKeySize)
+
+	return privateKey, publicKey, nil
+}
+
+// generateRSAKeyPair generates an RSA key pair locally
 func (h *ServerKeyGenHandler) generateRSAKeyPair() (*rsa.PrivateKey, *rsa.PublicKey, error) {
 	keySize := h.config.DefaultKeySize
 
