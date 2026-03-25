@@ -1,0 +1,178 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup tools
+        uses: jdx/mise-action@v3
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Run unit tests
+        run: make test-unit
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.out
+          flags: unittests
+          name: codecov-unit
+          token: ${{ secrets.CODECOV_TOKEN }}
+        continue-on-error: true # Don't fail if Codecov token is not set
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    # Note: Uses OpenBao for integration testing (open-source alternative to OpenBao)
+    env:
+      BAO_DEV_ROOT_TOKEN_ID: "root-token"
+      BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:8200"
+      BAO_SKIP_VERIFY: "true"
+
+    services:
+      openbao:
+        image: quay.io/openbao/openbao:latest
+        env:
+          BAO_ADDR: "http://${{ env.BAO_DEV_LISTEN_ADDRESS }}"
+          SKIP_SETCAP: true
+          BAO_DEV_ROOT_TOKEN_ID: "${{ env.BAO_DEV_ROOT_TOKEN_ID }}"
+          BAO_DEV_LISTEN_ADDRESS: "${{ env.BAO_DEV_LISTEN_ADDRESS }}"
+        ports:
+          - 8200:8200
+        options: >-
+          --cap-add=IPC_LOCK
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup tools
+        uses: jdx/mise-action@v3
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Wait for OpenBao
+        run: |
+          echo "Waiting for OpenBao is ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8200/v1/sys/health >/dev/null 2>&1; then
+              echo "OpenBao is ready"
+              exit 0
+            fi
+            echo "Waiting for OpenBao... ($i/30)"
+            sleep 2
+          done
+          echo "OpenBao failed to start"
+          exit 1
+
+      - name: Setup integration tests backend
+        env:
+          BACKEND_ADDR: http://localhost:8200
+          BACKEND_TOKEN: ${{ env.BAO_DEV_ROOT_TOKEN_ID }}
+          ENABLE_CERT_AUTH: "true"
+        run: test/scripts/setup_backend.sh
+
+      - name: Run integration tests
+        env:
+          BAO_ADDR: http://localhost:8200
+          BAO_TOKEN: ${{ env.BAO_DEV_ROOT_TOKEN_ID }}
+        run: make test-integration
+
+      - name: Upload integration test coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage_integration.out
+          flags: integration
+          name: codecov-integration
+          token: ${{ secrets.CODECOV_TOKEN }}
+        continue-on-error: true # Don't fail if Codecov token is not set
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup tools
+        uses: jdx/mise-action@v3
+
+      - name: golangci-lint
+        run: make lint
+
+  build-binary:
+    name: Build Binary
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup tools
+        uses: jdx/mise-action@v3
+
+      - name: Build binary
+        run: make build
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: est-service-binary
+          path: bin/est-service
+          retention-days: 7
+
+  build-container:
+    name: Build Container
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: deployments/docker/Dockerfile
+          push: false
+          tags: est-service:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

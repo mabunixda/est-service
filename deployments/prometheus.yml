@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: "docker-compose"
+    environment: "development"
+
+scrape_configs:
+  - job_name: "est-service"
+    static_configs:
+      - targets: ["est-service:9090"]
+        labels:
+          service: "est-service"
+
+  - job_name: "openbao"
+    metrics_path: "/v1/sys/metrics"
+    params:
+      format: ["prometheus"]
+    static_configs:
+      - targets: ["openbao:8200"]
+        labels:
+          service: "openbao"

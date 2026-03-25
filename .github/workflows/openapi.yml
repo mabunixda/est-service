@@ -1,0 +1,38 @@
+---
+name: OpenAPI Validation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/swagger.*"
+  pull_request:
+    branches: [main]
+    paths:
+      - "docs/swagger.*"
+
+jobs:
+  openapi-validate:
+    name: Validate OpenAPI
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup tools
+        uses: jdx/mise-action@v3
+
+      - uses: stoplightio/spectral-action@latest
+        with:
+          file_glob: "docs/swagger.yaml"
+
+      - name: Upload OpenAPI spec as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-spec
+          path: |
+            docs/swagger.json
+            docs/swagger.yaml
+            docs/docs.go
+          retention-days: 30

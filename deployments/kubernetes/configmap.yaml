@@ -1,0 +1,62 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: est-service-config
+data:
+  config.yaml: |
+    server:
+      listen_address: "0.0.0.0:8443"
+      read_timeout: 15s
+      write_timeout: 15s
+      idle_timeout: 60s
+      rate_limit:
+        enabled: true
+        requests_per_second: 100
+        burst: 200
+      tls:
+        cert_file: "/etc/est/tls/tls.crt"
+        key_file: "/etc/est/tls/tls.key"
+        client_ca_file: "/etc/est/ca/ca.crt"
+        client_auth_type: "request"
+
+    backend:
+      address: "http://openbao.openbao.svc.cluster.local:8200"
+      token_file: "/var/run/secrets/openbao/token"
+      timeout: 30s
+
+    est:
+      enabled: true
+      default_mount: "pki"
+      
+      labels:
+        devices:
+          type: "role"
+          value: "device-cert"
+      
+      default_policy:
+        type: "role"
+        value: "est-devices"
+      
+      authenticators:
+        userpass:
+          enabled: true
+          mount_path: "userpass"
+        approle:
+          enabled: false
+          mount_path: "approle"
+        cert:
+          enabled: true
+          mount_path: "cert"
+        token:
+          enabled: true
+      
+      csr_validation:
+        max_size_bytes: 32768
+
+    observability:
+      metrics:
+        enabled: true
+        prometheus_port: 9090
+      logging:
+        level: "info"
+        format: "json"

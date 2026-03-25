@@ -1,0 +1,16 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: est-service
+  labels:
+    app: est-service
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: est-service
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
+      scheme: http
