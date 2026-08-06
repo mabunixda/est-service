@@ -1,0 +1,94 @@
+# EST Service Development Configuration
+# Minimal config for local testing with OpenBao dev server
+
+# ⚠️  DEVELOPER MODE - Disables TLS requirement (NOT FOR PRODUCTION)
+developer_mode: true
+
+server:
+  listen_address: "127.0.0.1:8443"
+  read_timeout: 15s
+  write_timeout: 15s
+  idle_timeout: 60s
+  # Allow unauthenticated access to /metrics and /swagger in dev
+  internal_endpoints_auth: false
+  rate_limit:
+    enabled: false # Disabled for development
+    trusted_proxy_cidrs: []
+  tls:
+    # No cert/key files - HTTP mode (allowed only in developer_mode)
+
+# Backend: OpenBao dev server
+backend:
+  # Backend type: "openbao"
+  # - Explicit type (recommended for production): faster, predictable
+  # - "auto" or omit: auto-detects from version endpoint
+  type: "openbao"
+  address: "${BAO_ADDR}"
+  tls_skip_verify: true
+  timeout: 30s
+
+est:
+  enabled: true
+  default_mount: "pki"
+
+  default_policy:
+    type: "role"
+    value: "est-devices"
+    ttl: "2h" # Short TTL for development/testing
+
+  authenticators:
+    userpass:
+      enabled: true
+      mount_path: "userpass"
+    ldap:
+      enabled: false
+      mount_path: "ldap"
+    approle:
+      enabled: false
+      mount_path: "approle"
+    cert:
+      enabled: true
+      mount_path: "cert"
+      cert_role: "est-client"
+      # entity_alias_prefix: "est-cert-" # Optional: defaults to "est-cert-"
+      # token_ttl: "24h"                  # Optional: defaults to "24h"
+    token:
+      enabled: true
+
+  csr_validation:
+    max_size_bytes: 65536
+    allowed_signature_algorithms:
+      - "SHA256WithRSA"
+      - "SHA384WithRSA"
+      - "SHA512WithRSA"
+      - "ECDSAWithSHA256"
+      - "ECDSAWithSHA384"
+      - "ECDSAWithSHA512"
+
+  # Server-side key generation (RFC 7030 Section 4.4)
+  # WARNING: Disabled by default for security - transmits private keys over network
+  # Only enable if client-side key generation is not feasible
+  server_key_gen:
+    enabled: false # MUST be false unless specifically required
+    encrypt_private_key: true # REQUIRED if enabled: encrypts private keys
+    default_key_type: "rsa" # rsa or ecdsa
+    default_key_size: 2048 # RSA: 2048, 3072, 4096; ECDSA: 256, 384, 521
+    max_csr_size: 4096 # Maximum CSR size for serverkeygen requests
+    use_auth_token: true # Use authenticated token for PKI operations
+    use_openbao_transit: false # Use OpenBao Transit for key generation (default: false)
+    transit_mount: "transit" # Transit engine mount path
+
+observability:
+  metrics:
+    enabled: true
+    prometheus_port: 9090
+    otlp_insecure: true
+  logging:
+    level: "debug"
+    format: "text"
+    stdout: true
+    file: "" # Optional log file path
+  audit:
+    enabled: false
+    stdout: true
+    file: "" # Optional audit log file path

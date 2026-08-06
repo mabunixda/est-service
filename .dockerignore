@@ -1,0 +1,52 @@
+# Git
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+!README.md
+website/
+
+# Build artifacts
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Test files
+*_test.go
+test/
+testdata/
+
+# CI/CD
+.circleci/
+.travis.yml
+.gitlab-ci.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Deployment (except configs needed for image)
+deployments/kubernetes/
+deployments/grafana/
+!deployments/docker/
+
+# Docker
+Dockerfile
+Dockerfile.*
+docker-compose.yml
+.dockerignore
+
+# Misc
+tmp/
+temp/
+*.log
+coverage.*

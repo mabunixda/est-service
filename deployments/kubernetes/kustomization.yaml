@@ -1,0 +1,37 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: est-service
+
+resources:
+  - servicemonitor.yaml
+
+images:
+  - name: est-service
+    newTag: latest
+
+commonLabels:
+  app.kubernetes.io/name: est-service
+  app.kubernetes.io/component: est-proxy
+  app.kubernetes.io/part-of: pki-infrastructure
+
+configMapGenerator:
+  - name: est-service-env
+    literals:
+      - LOG_LEVEL=info
+      - METRICS_ENABLED=true
+
+secretGenerator: []
+
+replicas:
+  - name: est-service
+    count: 2
+
+patches:
+  - patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/image
+        value: est-service:latest
+    target:
+      kind: Deployment
+      name: est-service

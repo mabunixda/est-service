@@ -1,0 +1,154 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: est-service
+  labels:
+    app: est-service
+    version: v1
+spec:
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: est-service
+  template:
+    metadata:
+      labels:
+        app: est-service
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: est-service
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: est-service
+          image: est-service:latest
+          imagePullPolicy: IfNotPresent
+
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+
+          volumeMounts:
+            - name: config
+              mountPath: /etc/est
+              readOnly: true
+            - name: tls
+              mountPath: /etc/est/tls
+              readOnly: true
+            - name: ca
+              mountPath: /etc/est/ca
+              readOnly: true
+            - name: openbao-token
+              mountPath: /var/run/secrets/openbao
+              readOnly: true
+
+          livenessProbe:
+            # /health checks service and backend health, TLS cert expiry
+            # Returns 503 if backend is unavailable or sealed
+            httpGet:
+              path: /health
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+
+          readinessProbe:
+            # /ready performs quick backend connectivity check (2s timeout)
+            # Returns 503 if backend is unreachable or sealed
+            httpGet:
+              path: /ready
+              port: https
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+
+          # Optional: Use /health/deep for startup probes (more detailed checks)
+          # Requires authentication if internal_endpoints_auth is enabled
+          # startupProbe:
+          #   httpGet:
+          #     path: /health/deep
+          #     port: https
+          #     scheme: HTTPS
+          #   initialDelaySeconds: 15
+          #   periodSeconds: 10
+          #   timeoutSeconds: 5
+          #   successThreshold: 1
+          #   failureThreshold: 30
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            capabilities:
+              drop:
+                - ALL
+
+      volumes:
+        - name: config
+          configMap:
+            name: est-service-config
+        - name: tls
+          secret:
+            secretName: est-service-tls
+        - name: ca
+          secret:
+            secretName: est-service-ca
+        - name: openbao-token
+          secret:
+            secretName: openbao-token
+
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchExpressions:
+                    - key: app
+                      operator: In
+                      values:
+                        - est-service
+                topologyKey: kubernetes.io/hostname

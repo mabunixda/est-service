@@ -1,0 +1,267 @@
+openapi: 3.0.3
+info:
+  title: EST Service API
+  description: |
+    Enrollment over Secure Transport (EST) Service implementing RFC 7030.
+
+    This service provides a standards-compliant EST implementation that uses
+    OpenBao as the backend PKI system.
+
+    **Authentication Methods:**
+    - HTTP Basic Auth (mapped to backend userpass or AppRole)
+    - TLS Client Certificates (mapped to backend cert auth)
+    - Bearer Token (backend token authentication)
+  version: 1.0.0
+  contact:
+    name: EST Service
+    url: https://github.com/mabunixda/est-service
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/en-US/MPL/2.0/
+
+servers:
+  - url: https://localhost:8443
+    description: Development server
+  - url: https://est.example.com
+    description: Production server
+
+tags:
+  - name: EST
+    description: EST protocol endpoints (RFC 7030)
+  - name: Health
+    description: Health and readiness checks
+  - name: Metrics
+    description: Observability endpoints
+
+paths:
+  /.well-known/est/cacerts:
+    get:
+      tags:
+        - EST
+      summary: Get CA certificates
+      description: |
+        Retrieve the current CA certificate(s) used by the EST server.
+        Returns a PKCS#7 certs-only structure containing one or more certificates.
+      operationId: getCACerts
+      responses:
+        "200":
+          description: CA certificates retrieved successfully
+          content:
+            application/pkcs7-mime:
+              schema:
+                type: string
+                format: binary
+                description: PKCS#7 certs-only structure (DER encoded)
+          headers:
+            Content-Type:
+              schema:
+                type: string
+                example: application/pkcs7-mime
+            Content-Transfer-Encoding:
+              schema:
+                type: string
+                example: base64
+        "500":
+          description: Internal server error
+          content:
+            text/plain:
+              schema:
+                type: string
+
+  /.well-known/est/simpleenroll:
+    post:
+      tags:
+        - EST
+      summary: Simple enrollment
+      description: |
+        Enroll for a new certificate. Client submits a PKCS#10 CSR and
+        receives a PKCS#7 certs-only structure containing the issued certificate.
+
+        **Authentication required**: One of HTTP Basic Auth, TLS Client Certificate, or Bearer Token.
+      operationId: simpleEnroll
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+        - clientCert: []
+      requestBody:
+        required: true
+        content:
+          application/pkcs10:
+            schema:
+              type: string
+              format: binary
+              description: PKCS#10 CSR (DER or PEM encoded)
+      responses:
+        "200":
+          description: Certificate issued successfully
+          content:
+            application/pkcs7-mime:
+              schema:
+                type: string
+                format: binary
+                description: PKCS#7 certs-only structure containing the new certificate
+          headers:
+            Content-Type:
+              schema:
+                type: string
+                example: application/pkcs7-mime
+        "400":
+          description: Bad request (invalid CSR)
+          content:
+            text/plain:
+              schema:
+                type: string
+        "401":
+          description: Authentication required
+          headers:
+            WWW-Authenticate:
+              schema:
+                type: string
+                example: 'Basic realm="EST"'
+        "403":
+          description: Authorization failed
+        "500":
+          description: Internal server error
+
+  /.well-known/est/simplereenroll:
+    post:
+      tags:
+        - EST
+      summary: Simple re-enrollment
+      description: |
+        Re-enroll an existing certificate. Client submits a PKCS#10 CSR and
+        receives a new certificate. Requires client certificate authentication.
+
+        **Authentication required**: TLS Client Certificate (existing certificate).
+      operationId: simpleReenroll
+      security:
+        - clientCert: []
+      requestBody:
+        required: true
+        content:
+          application/pkcs10:
+            schema:
+              type: string
+              format: binary
+              description: PKCS#10 CSR (DER or PEM encoded)
+      responses:
+        "200":
+          description: Certificate re-issued successfully
+          content:
+            application/pkcs7-mime:
+              schema:
+                type: string
+                format: binary
+                description: PKCS#7 certs-only structure containing the new certificate
+        "400":
+          description: Bad request (invalid CSR)
+        "401":
+          description: Client certificate authentication required
+        "403":
+          description: Authorization failed
+        "500":
+          description: Internal server error
+
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: Returns OK if the service is running
+      operationId: getHealth
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /ready:
+    get:
+      tags:
+        - Health
+      summary: Readiness check
+      description: Returns OK if the service is ready to accept requests
+      operationId: getReady
+      responses:
+        "200":
+          description: Service is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  backend:
+                    type: string
+                    example: connected
+        "503":
+          description: Service not ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: not ready
+                  error:
+                    type: string
+
+  /metrics:
+    get:
+      tags:
+        - Metrics
+      summary: Prometheus metrics
+      description: |
+        Prometheus-compatible metrics endpoint exposing service metrics.
+        Includes request counts, durations, error rates, and active connections.
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Metrics retrieved successfully
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: |
+                  # HELP est_requests_total Total number of HTTP requests
+                  # TYPE est_requests_total counter
+                  est_requests_total{http_method="POST",http_path="/.well-known/est/simpleenroll",http_status_code="200"} 42
+
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: HTTP Basic Authentication mapped to backend userpass or AppRole authentication
+
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: Bearer token authentication using backend token
+
+    clientCert:
+      type: mutualTLS
+      description: TLS client certificate authentication mapped to backend cert auth
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+      required:
+        - error
+
+externalDocs:
+  description: RFC 7030 - Enrollment over Secure Transport
+  url: https://datatracker.ietf.org/doc/html/rfc7030
