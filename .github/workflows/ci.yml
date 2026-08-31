@@ -172,11 +172,11 @@ jobs:
       - name: Prepare Run
         id: build_prepare
         run: |
-          runTarget=snapshot
+          runArgs=build --snapshot
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            runTarget=release
+            runArgs=release
           fi
-          echo BUILD_FLAGS="$runTarget" >> "$GITHUB_OUTPUT"
+          echo BUILD_FLAGS="$runArgs" >> "$GITHUB_OUTPUT"
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
