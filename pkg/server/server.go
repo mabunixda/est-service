@@ -65,7 +65,7 @@ type Config struct {
 	ServerKeyGenMaxCSRSize           int
 	ServerKeyGenUseAuthToken         *bool // Pointer to detect if explicitly set (nil = default to true)
 	ServerKeyGenEncryptKey           bool
-	ServerKeyGenUseOpenBaoTransit      bool   // Use OpenBao Transit for key generation
+	ServerKeyGenUseOpenBaoTransit    bool   // Use OpenBao Transit for key generation
 	ServerKeyGenTransitMount         string // Transit engine mount path (default: "transit")
 	ServerKeyGenTransitKeyNamePrefix string // Prefix for temporary Transit key names (default: "temp-keygen-")
 }
@@ -305,7 +305,7 @@ func (s *Server) setupRoutes() *http.ServeMux {
 			AllowedKeySizes:      s.config.ServerKeyGenAllowedSizes,
 			UseAuthToken:         useAuthToken,
 			EncryptPrivateKey:    s.config.ServerKeyGenEncryptKey,
-			UseOpenBaoTransit:      s.config.ServerKeyGenUseOpenBaoTransit,
+			UseOpenBaoTransit:    s.config.ServerKeyGenUseOpenBaoTransit,
 			TransitMount:         s.config.ServerKeyGenTransitMount,
 			TransitKeyNamePrefix: s.config.ServerKeyGenTransitKeyNamePrefix,
 		}

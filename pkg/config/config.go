@@ -157,7 +157,7 @@ type ServerKeyGenConfig struct {
 	MaxCSRSize           int      `yaml:"max_csr_size"`            // Maximum CSR size in bytes (default: 4096)
 	UseAuthToken         *bool    `yaml:"use_auth_token"`          // Use authenticated token for PKI operations (default: true if not specified)
 	EncryptPrivateKey    bool     `yaml:"encrypt_private_key"`     // Encrypt private key in response (default: false, not widely supported)
-	UseOpenBaoTransit      bool     `yaml:"use_openbao_transit"`       // Use OpenBao Transit engine for key generation (default: false)
+	UseOpenBaoTransit    bool     `yaml:"use_openbao_transit"`     // Use OpenBao Transit engine for key generation (default: false)
 	TransitMount         string   `yaml:"transit_mount"`           // Transit engine mount path (default: "transit")
 	TransitKeyNamePrefix string   `yaml:"transit_key_name_prefix"` // Prefix for temporary Transit key names (default: "temp-keygen-")
 }
