@@ -21,12 +21,12 @@ import (
 
 var (
 	// Shared test infrastructure
-	openbaoAddr   string
-	openbaoToken  string
-	testBackend Backend
-	testLogger  *slog.Logger
-	pkiMount    string // Configurable PKI mount path for tests
-	testCounter int    // Counter for generating unique test resource names
+	openbaoAddr  string
+	openbaoToken string
+	testBackend  Backend
+	testLogger   *slog.Logger
+	pkiMount     string // Configurable PKI mount path for tests
+	testCounter  int    // Counter for generating unique test resource names
 )
 
 // TestMain sets up and tears down the test environment

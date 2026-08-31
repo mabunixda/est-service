@@ -236,7 +236,7 @@ func main() {
 		ServerKeyGenMaxCSRSize:           cfg.EST.ServerKeyGen.MaxCSRSize,
 		ServerKeyGenUseAuthToken:         cfg.EST.ServerKeyGen.UseAuthToken,
 		ServerKeyGenEncryptKey:           cfg.EST.ServerKeyGen.EncryptPrivateKey,
-		ServerKeyGenUseOpenBaoTransit:      cfg.EST.ServerKeyGen.UseOpenBaoTransit,
+		ServerKeyGenUseOpenBaoTransit:    cfg.EST.ServerKeyGen.UseOpenBaoTransit,
 		ServerKeyGenTransitMount:         cfg.EST.ServerKeyGen.TransitMount,
 		ServerKeyGenTransitKeyNamePrefix: cfg.EST.ServerKeyGen.TransitKeyNamePrefix,
 	}
