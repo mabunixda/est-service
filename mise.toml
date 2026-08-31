@@ -1,7 +1,9 @@
 [tools]
 go = "1.25.8"
+"go:golang.org/x/vuln/cmd/govulncheck" = "latest"
 golangci-lint = "latest"
 goreleaser = "latest"
 openbao = "2.4.4"
+pinact = "latest"
 spectral = "latest"
 swag = "latest"
