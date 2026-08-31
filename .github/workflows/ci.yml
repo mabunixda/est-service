@@ -172,9 +172,9 @@ jobs:
       - name: Prepare Run
         id: build_prepare
         run: |
-          runArgs=build --snapshot
+          runArgs="build --snapshot"
           if [ "$GITHUB_REF_TYPE" = "tag" ]; then
-            runArgs=release
+            runArgs="release"
           fi
           echo BUILD_FLAGS="$runArgs" >> "$GITHUB_OUTPUT"
 
