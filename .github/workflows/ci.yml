@@ -9,7 +9,7 @@ on:
 
 jobs:
   test-unit:
-    if: github.event_name == "pull_request"
+    if: github.event_name == 'pull_request'
     name: Unit Tests
     runs-on: ubuntu-latest
 
@@ -46,7 +46,7 @@ jobs:
         continue-on-error: true # Don't fail if Codecov token is not set
 
   test-integration:
-    if: github.event_name == "pull_request"
+    if: github.event_name == 'pull_request'
     name: Integration Tests
     runs-on: ubuntu-latest
     # Note: Uses OpenBao for integration testing (open-source alternative to OpenBao)
@@ -125,7 +125,7 @@ jobs:
         continue-on-error: true # Don't fail if Codecov token is not set
 
   lint:
-    if: github.event_name == "pull_request"
+    if: github.event_name == 'pull_request'
     name: Lint
     runs-on: ubuntu-latest
 
