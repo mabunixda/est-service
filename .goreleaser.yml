@@ -118,7 +118,7 @@ dockers_v2:
       - "{{ .Tag }}"
       - "v{{ .Major }}"
       - "v{{ .Major }}.{{ .Minor }}"
-    dockerfile: deployments/docker/Dockerfile
+    dockerfile: deployments/docker/Dockerfile.goreleaser
     annotations:
       "org.opencontainers.image.created": "{{.Date}}"
       "org.opencontainers.image.title": "{{.ProjectName}}"
