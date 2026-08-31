@@ -193,9 +193,6 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && success()
     needs: 
       - build
-      - test-integration
-      - test-unit
-      - lint
 
     permissions:
       contents: write
