@@ -142,7 +142,6 @@ jobs:
 
   build:
     name: Building
-    name: GoReleaser
     runs-on: ubuntu-latest
 
     steps:
