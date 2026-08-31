@@ -1,3 +1,4 @@
+version: 2
 project_name: est-service
 
 before:
@@ -34,7 +35,7 @@ builds:
 
 archives:
   - id: default
-    format: tar.gz
+    formats: ["tar.gz"]
     name_template: >-
       {{ .ProjectName }}_
       {{- .Version }}_
@@ -45,7 +46,7 @@ archives:
       {{- if .Arm }}v{{ .Arm }}{{ end }}
     format_overrides:
       - goos: windows
-        format: zip
+        formats: ["zip"]
     files:
       - README.md
       - LICENSE
@@ -55,7 +56,7 @@ checksum:
   name_template: 'checksums.txt'
 
 snapshot:
-  name_template: "{{ incpatch .Version }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
@@ -109,23 +110,26 @@ release:
     kubectl apply -k .
     ```
 
-dockers:
-  - image_templates:
-      - "ghcr.io/mabunixda/est-service:{{ .Tag }}"
-      - "ghcr.io/mabunixda/est-service:v{{ .Major }}"
-      - "ghcr.io/mabunixda/est-service:v{{ .Major }}.{{ .Minor }}"
-      - "ghcr.io/mabunixda/est-service:latest"
+dockers_v2:
+  - id: docker-est-service
+    images:
+      - "ghcr.io/mabunixda/est-service"
+    tags:
+      - "{{ .Tag }}"
+      - "v{{ .Major }}"
+      - "v{{ .Major }}.{{ .Minor }}"
     dockerfile: deployments/docker/Dockerfile
-    use: buildx
-    build_flag_templates:
-      - "--pull"
-      - "--label=org.opencontainers.image.created={{.Date}}"
-      - "--label=org.opencontainers.image.title={{.ProjectName}}"
-      - "--label=org.opencontainers.image.revision={{.FullCommit}}"
-      - "--label=org.opencontainers.image.version={{.Version}}"
-      - "--label=org.opencontainers.image.source={{.GitURL}}"
-      - "--platform=linux/amd64"
-
+    annotations:
+      "org.opencontainers.image.created": "{{.Date}}"
+      "org.opencontainers.image.title": "{{.ProjectName}}"
+      "org.opencontainers.image.revision": "{{.FullCommit}}"
+      "org.opencontainers.image.version": "{{.Version}}"
+      "org.opencontainers.image.source": "{{.GitURL}}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    sbom: "{{ not .IsNightly }}"
+     
 nfpms:
   - id: packages
     package_name: est-service
