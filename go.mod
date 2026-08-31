@@ -1,6 +1,6 @@
 module github.com/mabunixda/est-service
 
-go 1.25.13
+go 1.26
 
 require (
 	github.com/openbao/openbao/api/v2 v2.6.0
