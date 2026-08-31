@@ -176,32 +176,3 @@ jobs:
           tags: est-service:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-  release:
-    name: Semantic Release
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: 
-      - build-binary
-      - build-container
-      - test-integration
-      - test-unit
-      - lint
-
-    permissions:
-      contents: write
-      pull-requests: write
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Semantic Release
-        uses: go-semantic-release/action@v1
-        id: semrel
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          changelog-generator-opt: "emojis=true"
