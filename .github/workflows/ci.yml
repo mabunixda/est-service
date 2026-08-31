@@ -192,8 +192,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && success()
     needs: 
-      - build-binary
-      - build-container
+      - build
       - test-integration
       - test-unit
       - lint
