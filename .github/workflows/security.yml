@@ -23,7 +23,7 @@ jobs:
 
       - name: Get go version from mise
         id: go-version
-        run: echo "GO_VERSION=$(mise go version --short)" >> $GITHUB_ENV
+        run: echo "GO_VERSION=$(mise current go)" >> $GITHUB_ENV
 
       - id: govulncheck
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
