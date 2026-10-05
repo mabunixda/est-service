@@ -156,6 +156,14 @@ jobs:
       - name: Setup tools
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
+      - name: Extract tool versions from mise.toml
+        id: versions
+        run: |
+          # Extract goreleaser version from mise.toml
+          GORELEASER_VERSION=$(grep 'goreleaser' mise.toml | sed 's/.*= "\(.*\)".*/\1/')
+          echo "goreleaser=${GORELEASER_VERSION}" >> $GITHUB_OUTPUT
+          echo "✓ Extracted versions: goreleaser=${GORELEASER_VERSION}"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
@@ -182,7 +190,7 @@ jobs:
         uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
-          version: latest
+          version: ${{ steps.versions.outputs.goreleaser }}
           args: ${{ steps.build_prepare.outputs.BUILD_FLAGS }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}    

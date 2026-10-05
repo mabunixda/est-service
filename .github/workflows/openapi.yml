@@ -23,9 +23,18 @@ jobs:
       - name: Setup tools
         uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
 
+      - name: Extract tool versions from mise.toml
+        id: versions
+        run: |
+          # Extract spectral version from mise.toml
+          SPECTRAL_VERSION=$(grep 'spectral' mise.toml | sed 's/.*= "\(.*\)".*/\1/')
+          echo "spectral=${SPECTRAL_VERSION}" >> $GITHUB_OUTPUT
+          echo "✓ Extracted versions: spectral=${SPECTRAL_VERSION}"
+
       - uses: stoplightio/spectral-action@latest
         with:
           file_glob: "docs/swagger.yaml"
+          spectral-version: ${{ steps.versions.outputs.spectral }}
 
       - name: Upload OpenAPI spec as artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
