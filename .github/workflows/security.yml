@@ -29,17 +29,10 @@ jobs:
           echo "govulncheck=${GOVULNCHECK_VERSION}" >> $GITHUB_OUTPUT
           echo "✓ Extracted versions: govulncheck=${GOVULNCHECK_VERSION}"
 
-      - name: Get go version from mise
-        id: go-version
-        run: echo "version=$(mise current go)" >> $GITHUB_OUTPUT
-
-      - name: Pre-install govulncheck with version from mise.toml
-        run: go install golang.org/x/vuln/cmd/govulncheck@v${{ steps.versions.outputs.govulncheck }}
-
-      - id: govulncheck
-        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
-        with:
-          go-version-input: ${{ steps.go-version.outputs.version }}
+      - name: Run Go Vulnerability Check
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v${{ steps.versions.outputs.govulncheck }}
+          govulncheck ./...
 
   gosec:
     name: Security Scan with Gosec
