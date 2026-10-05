@@ -23,12 +23,12 @@ jobs:
 
       - name: Get go version from mise
         id: go-version
-        run: echo "GO_VERSION=$(mise current go)" >> $GITHUB_ENV
+        run: echo "version=$(mise current go)" >> $GITHUB_OUTPUT
 
       - id: govulncheck
         uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
         with:
-          go-version-input: ${{ env.GO_VERSION }}
+          go-version-input: ${{ steps.go-version.outputs.version }}
 
   gosec:
     name: Security Scan with Gosec
