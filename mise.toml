@@ -1,2 +1,6 @@
 [tools]
 go = "1.26.5"
+"go:golang.org/x/vuln/cmd/govulncheck" = "1.7.0"
+golangci-lint = "2.13.2"
+spectral = "6.16.3"
+goreleaser = "2.18.0"
