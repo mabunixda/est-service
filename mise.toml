@@ -4,6 +4,7 @@ go = "1.26.11"
 golangci-lint = "2.13.2"
 spectral = "6.16.3"
 goreleaser = "2.18.0"
+openbao = "latest"
 
 [tasks.test]
 run = "make test"
