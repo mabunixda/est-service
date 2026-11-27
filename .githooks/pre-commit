@@ -1,0 +1,18 @@
+#!/bin/bash
+set -e
+
+echo "Running pre-commit checks..."
+
+# Build
+eval "$(mise activate bash)"
+make build
+
+# Test
+echo "Testing..."
+make test
+
+# Lint
+echo "Linting..."
+make lint
+
+echo "✓ All checks passed"

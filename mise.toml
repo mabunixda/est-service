@@ -1,9 +1,19 @@
 [tools]
-go = "1.25.13"
+go = "1.26.11"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.7.0"
 golangci-lint = "2.13.2"
-goreleaser = "2.18.0"
-openbao = "2.6.2"
-pinact = "4.1.1"
 spectral = "6.16.3"
-swag = "1.16.6"
+goreleaser = "2.18.0"
+openbao = "latest"
+
+[tasks.test]
+run = "make test"
+
+[tasks.lint]
+run = "make lint"
+
+[tasks.build]
+run = "make build"
+
+[tasks.vulncheck]
+run = "govulncheck ./..."
