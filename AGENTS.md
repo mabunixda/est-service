@@ -31,6 +31,7 @@ mise run test
 mise run lint
 mise run build
 mise run format
+mise run vulncheck
 ```
 
 ### Why

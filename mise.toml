@@ -1,6 +1,18 @@
 [tools]
-go = "1.26.5"
+go = "1.26.11"
 "go:golang.org/x/vuln/cmd/govulncheck" = "1.7.0"
 golangci-lint = "2.13.2"
 spectral = "6.16.3"
 goreleaser = "2.18.0"
+
+[tasks.test]
+run = "make test"
+
+[tasks.lint]
+run = "make lint"
+
+[tasks.build]
+run = "make build"
+
+[tasks.vulncheck]
+run = "govulncheck ./..."

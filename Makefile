@@ -1,4 +1,4 @@
-.PHONY: build test lint clean docker-build docker-push help swagger
+.PHONY: build test lint clean docker-build docker-push help swagger vulncheck
 
 BINARY_NAME=est-service
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -53,8 +53,10 @@ test-all: test-unit test-integration
 lint:
 	golangci-lint run
 
-fmt: 
-	gofmt -s -w .
+vulncheck:
+	@echo "Running vulnerability check..."
+	@mise run vulncheck
+
 
 clean:
 	rm -rf bin/
